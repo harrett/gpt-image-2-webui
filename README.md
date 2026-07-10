@@ -34,7 +34,7 @@ If you want a beautiful, customizable, self-hosted **gpt-image-2 WebUI**, ImgX S
 | Reliable creative output | Requests 1-4 images as separate calls to reduce missing results from batch limits. |
 | Text-to-image and image-to-image | Generate from a prompt or upload up to 4 references for edits, variations, and extensions. |
 | Iteration, not one-off prompts | Select any generated image as the next source and continue with remix actions. |
-| Flexible API routing | Use browser-direct requests or a server proxy through `/api/images` to keep keys on the server. |
+| Flexible API routing | Requests are proxied through `/api/images`; the upstream base URL is server-controlled and never exposed to the browser. |
 | OpenAI-compatible endpoints | Base URLs are normalized automatically for `/v1/images/generations` and `/v1/images/edits`. |
 | Global-ready interface | Ships with UI copy for 9 languages and dedicated README files for each supported language. |
 
@@ -99,9 +99,7 @@ npm install
 
 ### 3. Configure environment variables
 
-For **browser direct** mode, you can skip server environment variables and enter the API key directly in the UI.
-
-For **server proxy** mode, copy the example file:
+Copy the example file:
 
 ```bash
 cp .env.example .env.local
@@ -110,8 +108,11 @@ cp .env.example .env.local
 Then fill in:
 
 ```bash
+INTERNAL_IMAGE_API_BASE_URL=https://api.openai.com
 OPENAI_API_KEY=sk-...
 ```
+
+`INTERNAL_IMAGE_API_BASE_URL` is required — the app fails to serve image requests without it. It's a server-only value; the browser never sees it. `OPENAI_API_KEY` is optional and only used as a fallback when a user hasn't entered their own key in the UI.
 
 ### 4. Start the dev server
 
@@ -126,16 +127,15 @@ Open [http://localhost:3000](http://localhost:3000).
 1. Enter a prompt or start from a built-in prompt preset.
 2. Optionally upload PNG / JPG / WEBP references, up to 4 images and 10MB per image.
 3. Choose size, quality, output format, background, and image count.
-4. Select a connection mode:
-   - **Browser direct**: the browser calls your endpoint directly; the endpoint must support CORS.
-   - **Server proxy**: the app forwards requests through `/api/images` and can use `OPENAI_API_KEY`.
+4. Enter your API key; requests are always forwarded through `/api/images` to the server-configured upstream.
 5. Generate images, select the strongest result, download it, or set it as the source image for the next round.
 
 ## Environment variables
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `OPENAI_API_KEY` | No | Used by server proxy mode. A key entered in the UI takes priority; otherwise the server env value is used. |
+| `INTERNAL_IMAGE_API_BASE_URL` | Yes | Server-only upstream image API base URL. Never exposed to the browser; the client cannot configure or override this. |
+| `OPENAI_API_KEY` | No | Used as a fallback when a user hasn't entered their own key in the UI. |
 | `NEXT_ASSET_PREFIX` | No | Sets the static asset prefix for sub-path or CDN deployments. |
 
 ## Deploy
@@ -144,7 +144,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 1. Fork this repository.
 2. Import it into Vercel.
-3. Add `OPENAI_API_KEY` in Vercel Project Settings if you want server proxy mode.
+3. Add `INTERNAL_IMAGE_API_BASE_URL` (required) and `OPENAI_API_KEY` (optional) in Vercel Project Settings.
 4. Deploy and open your project domain.
 
 ### Node.js / Docker-like environments
@@ -158,9 +158,9 @@ npm run start
 
 ## API key and privacy
 
-- In browser-direct mode, the API key is sent from the browser to the endpoint you configure.
-- If you enable **Remember on this device**, the API key and base URL are stored only in the current browser's `localStorage`.
-- In server-proxy mode, `OPENAI_API_KEY` can stay on the server so team members do not need to enter a shared key repeatedly.
+- The API key you enter is sent to `/api/images`, which forwards it to the server-configured upstream — the upstream address itself is never sent to or from the browser.
+- If you enable **Remember on this device**, only the API key is stored, in the current browser's `localStorage`.
+- `OPENAI_API_KEY` can stay on the server so team members do not need to enter a shared key repeatedly.
 
 ## Roadmap
 

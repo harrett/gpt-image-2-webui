@@ -139,6 +139,13 @@ export function extractGeneratedImages(payload: unknown, outputFormat: string) {
   return image ? [image, ...images] : images
 }
 
+const URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi
+const LOOPBACK_HOST_PATTERN = /\b(?:127\.0\.0\.1|localhost|0\.0\.0\.0|::1)\b/gi
+
+export function scrubUpstreamDetails(message: string) {
+  return message.replace(URL_PATTERN, "[redacted]").replace(LOOPBACK_HOST_PATTERN, "[redacted]")
+}
+
 export function getImageApiError(payload: unknown) {
   if (!isRecord(payload)) {
     return undefined

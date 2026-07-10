@@ -87,8 +87,6 @@ import { cn } from "@/lib/utils"
 const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
-const DEFAULT_ENDPOINT = "https://api.openai.com/v1"
-const GITHUB_REPOSITORY_URL = "https://github.com/imgx-studio/gpt-image-2-webui"
 const CONNECTION_PREFERENCES_KEY = "imgx.connectionPreferences"
 const LEGACY_API_KEY_KEY = "imgx.apiKey"
 const LEGACY_REMEMBER_KEY_KEY = "imgx.rememberKey"
@@ -110,23 +108,6 @@ const PRESET_SIZE_VALUES = [
   "3840x2160",
   "2160x3840",
 ] as const
-
-function GitHubMarkIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      data-icon="inline-start"
-      fill="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path
-        clipRule="evenodd"
-        d="M12 0.75C5.79 0.75 0.75 5.79 0.75 12c0 4.97 3.22 9.18 7.69 10.67 0.56 0.1 0.77-0.24 0.77-0.54 0-0.27-0.01-1.14-0.02-2.07-3.13 0.68-3.79-1.33-3.79-1.33-0.51-1.3-1.25-1.65-1.25-1.65-1.02-0.7 0.08-0.68 0.08-0.68 1.13 0.08 1.73 1.16 1.73 1.16 1 1.72 2.63 1.22 3.27 0.93 0.1-0.73 0.39-1.22 0.71-1.5-2.5-0.28-5.13-1.25-5.13-5.56 0-1.23 0.44-2.23 1.16-3.02-0.12-0.28-0.5-1.43 0.11-2.98 0 0 0.95-0.3 3.09 1.15 0.9-0.25 1.86-0.38 2.82-0.38s1.92 0.13 2.82 0.38c2.15-1.45 3.09-1.15 3.09-1.15 0.61 1.55 0.23 2.7 0.11 2.98 0.72 0.79 1.16 1.79 1.16 3.02 0 4.32-2.63 5.27-5.14 5.55 0.4 0.35 0.76 1.03 0.76 2.08 0 1.5-0.01 2.71-0.01 3.07 0 0.3 0.2 0.65 0.77 0.54A11.26 11.26 0 0 0 23.25 12C23.25 5.79 18.21 0.75 12 0.75Z"
-        fillRule="evenodd"
-      />
-    </svg>
-  )
-}
 
 type RemixRecipeId = "variations" | "retouch" | "upscale" | "inpaint"
 
@@ -699,7 +680,6 @@ function getGenerationErrorMessage(error: unknown, fallback: string) {
 }
 
 type StudioResponse = {
-  endpoint: string
   generation: number
   images: GeneratedImage[]
   model: string
@@ -728,7 +708,6 @@ type StoredConnectionPreferences = {
   version: 1
   remember: boolean
   apiKey: string
-  endpoint: string
 }
 
 function formatBytes(bytes: number) {
@@ -1016,14 +995,12 @@ function readStoredConnectionPreferences(): StoredConnectionPreferences {
       if (
         parsed.version === 1 &&
         typeof parsed.remember === "boolean" &&
-        typeof parsed.apiKey === "string" &&
-        typeof parsed.endpoint === "string"
+        typeof parsed.apiKey === "string"
       ) {
         return {
           version: 1,
           remember: parsed.remember,
           apiKey: parsed.apiKey,
-          endpoint: parsed.endpoint.trim() || DEFAULT_ENDPOINT,
         }
       }
     } catch {
@@ -1037,7 +1014,6 @@ function readStoredConnectionPreferences(): StoredConnectionPreferences {
     version: 1,
     remember,
     apiKey: remember ? localStorage.getItem(LEGACY_API_KEY_KEY) || "" : "",
-    endpoint: remember ? localStorage.getItem(LEGACY_ENDPOINT_KEY)?.trim() || DEFAULT_ENDPOINT : DEFAULT_ENDPOINT,
   }
 }
 
@@ -1050,13 +1026,11 @@ function clearStoredConnectionPreferences() {
 
 function writeStoredConnectionPreferences({
   apiKey,
-  endpoint,
-}: Pick<StoredConnectionPreferences, "apiKey" | "endpoint">) {
+}: Pick<StoredConnectionPreferences, "apiKey">) {
   const preferences: StoredConnectionPreferences = {
     version: 1,
     remember: true,
     apiKey,
-    endpoint: endpoint.trim() || DEFAULT_ENDPOINT,
   }
 
   localStorage.setItem(CONNECTION_PREFERENCES_KEY, JSON.stringify(preferences))
@@ -1083,7 +1057,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false)
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
   const [selectedPromptPresetIndex, setSelectedPromptPresetIndex] = useState(0)
-  const [endpoint, setEndpoint] = useState(DEFAULT_ENDPOINT)
   const [model, setModel] = useState("gpt-image-2")
   const [uploads, setUploads] = useState<UploadPreview[]>([])
   const [isReferenceDropActive, setIsReferenceDropActive] = useState(false)
@@ -1153,7 +1126,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
       setRememberKey(preferences.remember)
       setApiKey(preferences.apiKey)
-      setEndpoint(preferences.endpoint)
 
       setHasLoadedPreferences(true)
     }, 0)
@@ -1171,8 +1143,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       return
     }
 
-    writeStoredConnectionPreferences({ apiKey, endpoint })
-  }, [apiKey, endpoint, hasLoadedPreferences, rememberKey])
+    writeStoredConnectionPreferences({ apiKey })
+  }, [apiKey, hasLoadedPreferences, rememberKey])
 
   useEffect(() => {
     uploadsRef.current = uploads
@@ -1386,13 +1358,12 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     }
   }
 
-  async function callProxy(requestedCount: number): Promise<{ endpoint: string; images: GeneratedImage[] }> {
+  async function callProxy(requestedCount: number): Promise<{ images: GeneratedImage[] }> {
     const formData = new FormData()
     const requestPrompt = buildRequestPrompt(prompt, activeSource)
 
     formData.append("apiKey", apiKey.trim())
     formData.append("background", background)
-    formData.append("endpoint", endpoint.trim())
     formData.append("imageCount", String(requestedCount))
     formData.append("locale", locale)
     formData.append("model", model)
@@ -1410,7 +1381,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       body: formData,
     })
     const payload = (await response.json()) as {
-      endpoint?: string
       error?: string
       images?: GeneratedImage[]
     }
@@ -1424,7 +1394,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     }
 
     return {
-      endpoint: payload.endpoint || endpoint,
       images: payload.images,
     }
   }
@@ -1453,7 +1422,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     setSelectedImageIndex(0)
 
     const total = Math.min(Math.max(imageCount, 1), 4)
-    let collectedEndpoint = ""
     let firstError: unknown = null
 
     try {
@@ -1462,7 +1430,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       let attempts = 0
 
       const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
-        endpoint: collectedEndpoint,
         generation: nextGeneration,
         images: visibleImages,
         model,
@@ -1489,7 +1456,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       const runRequest = async () => {
         try {
           const topUp = await callProxy(1)
-          collectedEndpoint = topUp.endpoint
 
           if (images.length < total) {
             images.push(...topUp.images.slice(0, total - images.length))
@@ -1618,20 +1584,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <a
-              aria-label="GitHub"
-              className={cn(
-                buttonVariants({ size: "lg", variant: "outline" }),
-                "h-10 rounded-md bg-muted/40 px-3 shadow-sm"
-              )}
-              href={GITHUB_REPOSITORY_URL}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <GitHubMarkIcon />
-              <span className="hidden sm:inline">GitHub</span>
-              <span className="sr-only sm:hidden">GitHub</span>
-            </a>
           </div>
         </div>
       </header>
@@ -1937,21 +1889,12 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                 </Field>
 
                 <Field>
-                  <FieldLabel
-                    htmlFor="endpoint"
-                    className="text-xs font-semibold text-muted-foreground"
-                  >
-                    {text.baseUrl}
+                  <FieldLabel className="text-xs font-semibold text-muted-foreground">
+                    {text.connectionInterfaceLabel}
                   </FieldLabel>
-                  <Input
-                    id="endpoint"
-                    className="studio-control rounded-md font-mono text-xs focus-visible:border-primary focus-visible:ring-primary/20"
-                    value={endpoint}
-                    onChange={(event) => setEndpoint(event.target.value)}
-                  />
-                  <FieldDescription className="text-xs">
-                    {text.baseUrlDescription}
-                  </FieldDescription>
+                  <div className="studio-control flex h-11 items-center rounded-md border bg-muted/30 px-3 text-xs text-muted-foreground">
+                    {text.connectionInterfaceValue}
+                  </div>
                 </Field>
 
                 <Field>
@@ -2060,8 +2003,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
               <KeyRoundIcon className="size-3" />
               {apiKey ? text.keySet : text.noKey}
               <span className="text-border">·</span>
-              <span className="max-w-[260px] truncate font-mono text-[11px]">
-                {endpoint}
+              <span className="text-[11px]">
+                {text.connectionInterfaceValue}
               </span>
             </div>
           </div>
@@ -2228,7 +2171,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                   ],
                   [workflow.activeSource, result.sourceLabel || workflow.sourceRound.replace("{round}", String(result.generation))],
                   [text.summaryRefs, String(inputUploadCount)],
-                  [text.summaryEndpoint, result.endpoint],
                 ].map(([key, value]) => (
                   <div
                     key={key}
@@ -2237,12 +2179,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                     <span className="font-medium text-muted-foreground">
                       {key}
                     </span>
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 truncate text-foreground",
-                        key === text.summaryEndpoint ? "text-left" : "text-right"
-                      )}
-                    >
+                    <span className="min-w-0 flex-1 truncate text-right text-foreground">
                       {value}
                     </span>
                   </div>

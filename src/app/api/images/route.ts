@@ -6,12 +6,18 @@ import {
   extractGeneratedImages,
   getImageApiError,
   getPayloadField,
-  normalizeImageEndpoint,
   normalizeOpenAIBaseURL,
+  scrubUpstreamDetails,
 } from "@/lib/image-request"
 
 export const runtime = "nodejs"
 export const maxDuration = 120
+
+// Security: upstream base URL is server-controlled and read from a
+// server-only env var. Never prefix it with NEXT_PUBLIC_, never read it
+// in client code, never return its value to the browser. Do not accept
+// endpoint/baseUrl/baseURL/apiUrl fields from client requests.
+const INTERNAL_IMAGE_API_BASE_URL = process.env.INTERNAL_IMAGE_API_BASE_URL
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MIN_CUSTOM_DIMENSION = 64
@@ -123,7 +129,11 @@ function getEditSize(formData: FormData) {
 
 export async function POST(request: Request) {
   let locale = resolveLocale(request.headers.get("accept-language"))
-  let endpoint = ""
+
+  if (!INTERNAL_IMAGE_API_BASE_URL) {
+    console.error("[api/images] INTERNAL_IMAGE_API_BASE_URL is not configured")
+    return NextResponse.json({ error: t(locale, "imageServiceUnavailable") }, { status: 500 })
+  }
 
   try {
     const incomingFormData = await request.formData()
@@ -167,8 +177,7 @@ export async function POST(request: Request) {
     }
 
     const model = getText(incomingFormData, "model", "gpt-image-2")
-    endpoint = normalizeImageEndpoint(getText(incomingFormData, "endpoint"), images.length > 0, locale)
-    const baseURL = normalizeOpenAIBaseURL(getText(incomingFormData, "endpoint"), locale)
+    const baseURL = normalizeOpenAIBaseURL(INTERNAL_IMAGE_API_BASE_URL, locale)
     const outputFormat = getOutputFormat(incomingFormData)
     const imageCount = Number(getText(incomingFormData, "imageCount", "1"))
     const background = getBackground(incomingFormData)
@@ -220,7 +229,6 @@ export async function POST(request: Request) {
     if (!generatedImages.length) {
       return NextResponse.json(
         {
-          endpoint,
           error: t(locale, "proxyNoImageField"),
         },
         { status: 502 }
@@ -230,7 +238,6 @@ export async function POST(request: Request) {
     return NextResponse.json({
       background: getPayloadField(payload, "background"),
       created: getPayloadField(payload, "created"),
-      endpoint,
       images: generatedImages,
       model,
       outputFormat,
@@ -240,19 +247,23 @@ export async function POST(request: Request) {
     })
   } catch (error) {
     if (error instanceof OpenAI.APIError) {
+      const upstreamMessage = getImageApiError(error.error)
+
       return NextResponse.json(
         {
-          endpoint,
-          error: getImageApiError(error.error) || error.message || t(locale, "proxyRequestFailed", { status: error.status || 500 }),
+          error: (upstreamMessage && scrubUpstreamDetails(upstreamMessage)) ||
+            t(locale, "proxyRequestFailed", { status: error.status || 500 }),
         },
         { status: error.status || 500 }
       )
     }
 
+    // Security: never forward the raw exception message here — network-level
+    // failures (DNS, connection refused, timeouts) can embed the internal
+    // upstream host/port in their message text.
     return NextResponse.json(
       {
-        endpoint,
-        error: error instanceof Error ? error.message : t(locale, "proxyGenerationFailed"),
+        error: t(locale, "proxyGenerationFailed"),
       },
       { status: 500 }
     )
