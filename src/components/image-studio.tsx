@@ -947,7 +947,7 @@ function getBackgroundItems(locale: Locale) {
   return [
     { label: t(locale, "backgroundAuto"), value: "auto" },
     { label: t(locale, "backgroundOpaque"), value: "opaque" },
-    { label: t(locale, "backgroundTransparent"), value: "transparent" },
+    // { label: t(locale, "backgroundTransparent"), value: "transparent" },
   ]
 }
 
