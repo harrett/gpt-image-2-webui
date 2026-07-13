@@ -667,8 +667,8 @@ const remixRecipeItems: {
 
 const modelItems = [
   { label: "gpt-image-2", value: "gpt-image-2" },
-  { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
-  { label: "gpt-image-1", value: "gpt-image-1" },
+  // { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
+  // { label: "gpt-image-1", value: "gpt-image-1" },
 ]
 
 type PresetSizeValue = (typeof PRESET_SIZE_VALUES)[number]
@@ -1525,17 +1525,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       <header className="studio-header-surface sticky top-0 z-30 border-b backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-[1840px] items-center justify-between gap-3 px-4 py-3 sm:gap-5 sm:px-6">
           <div className="flex items-center">
-            <div className="studio-logo-mark shrink-0">
-              <Image
-                priority
-                alt="ImgX Studio"
-                className="studio-logo-image"
-                height={123}
-                src="/logo.png"
-                style={{ width: "100%", height: "auto" }}
-                width={426}
-              />
-            </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 font-mono text-[11px] text-muted-foreground shadow-sm md:flex">
