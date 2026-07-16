@@ -798,17 +798,17 @@ export const studioMessages: Record<Locale, StudioMessages> = {
 
 export const studioPromptPresets: Record<Locale, string[]> = {
   en: [
-    "Editorial portrait of a woman wearing translucent silk under hard cinematic key light, 35mm film grain, neutral cool palette, magazine cover aesthetic.",
+    "Editorial portrait of a woman wearing silk under hard cinematic key light, 35mm film grain, neutral cool palette, magazine cover aesthetic.",
     "Premium skincare hero shot: frosted glass bottle on cold marble, condensation droplets, soft beauty dish lighting, minimal commercial composition.",
     "Reimagine the uploaded product as a high-end e-commerce hero: keep silhouette, add refined material detail, dramatic studio lighting and luxury backdrop.",
   ],
   zh: [
-    "一位女性身穿半透明丝质面料的 editorial 风格人像，硬朗电影感主光，35mm 胶片颗粒，冷中性色调，杂志封面质感。",
+    "一位女性身穿丝质面料的 editorial 风格人像，硬朗电影感主光，35mm 胶片颗粒，冷中性色调，杂志封面质感。",
     "高端护肤品主视觉：磨砂玻璃瓶置于冷色大理石台面，表面有冷凝水珠，柔和美容灯光，极简商业构图。",
     "将上传的产品重塑为高端电商主图：保留原始轮廓，强化材质细节，使用戏剧化棚拍光线与奢华背景。",
   ],
   "zh-TW": [
-    "一位女性身穿半透明絲質面料的 editorial 風格人像，硬朗電影感主光，35mm 膠片顆粒，冷中性色調，雜誌封面質感。",
+    "一位女性身穿絲質面料的 editorial 風格人像，硬朗電影感主光，35mm 膠片顆粒，冷中性色調，雜誌封面質感。",
     "高端保養品主視覺：磨砂玻璃瓶置於冷色大理石台面，表面有冷凝水珠，柔和美容燈光，極簡商業構圖。",
     "將上傳的產品重塑為高端電商主圖：保留原始輪廓，強化材質細節，使用戲劇化棚拍光線與奢華背景。",
   ],
