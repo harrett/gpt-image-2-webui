@@ -1,11 +1,14 @@
 "use client"
 
 import Image from "next/image"
-import type { CSSProperties, DragEvent } from "react"
+import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react"
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import { createPortal } from "react-dom"
 import {
   ArrowDownToLineIcon,
   CheckCircle2Icon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   CopyPlusIcon,
   EyeIcon,
   EyeOffIcon,
@@ -24,6 +27,8 @@ import {
   SparklesIcon,
   WandSparklesIcon,
   XIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -113,7 +118,9 @@ type RemixRecipeId = "variations" | "retouch" | "upscale" | "inpaint"
 
 type WorkflowCopy = {
   activeSource: string
+  actualSize: string
   clearSource: string
+  closeViewer: string
   continueGeneration: string
   copyPrompt: string
   copyPromptFailed: string
@@ -121,13 +128,16 @@ type WorkflowCopy = {
   currentPrompt: string
   emptySelectionDescription: string
   emptySelectionTitle: string
+  fitToScreen: string
   flowSteps: string[]
   generatedAsset: string
   generationSkeletonTitle: string
   lineageTitle: string
+  nextImage: string
   noRevisedPrompt: string
   panelDescription: string
   panelTitle: string
+  previousImage: string
   recipeSuccess: string
   recipesTitle: string
   referenceSuccess: string
@@ -140,6 +150,8 @@ type WorkflowCopy = {
   sourceRound: string
   stageFailed: string
   stageWithRecipe: string
+  viewFullSize: string
+  viewerHint: string
   recipes: Record<RemixRecipeId, {
     description: string
     instruction: string
@@ -150,7 +162,9 @@ type WorkflowCopy = {
 const workflowCopies: Record<Locale, WorkflowCopy> = {
   en: {
     activeSource: "Active source image",
+    actualSize: "Actual size",
     clearSource: "Clear source image",
+    closeViewer: "Close viewer",
     continueGeneration: "Continue from source image",
     copyPrompt: "Copy prompt",
     copyPromptFailed: "Could not copy the prompt.",
@@ -158,13 +172,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "Current prompt",
     emptySelectionDescription: "Generate a set first, then pick one result to remix, upscale, retouch, or use as the next source image.",
     emptySelectionTitle: "No image selected yet",
+    fitToScreen: "Fit to screen",
     flowSteps: ["Generate options", "Select a winner", "Choose a remix move", "Generate the next round"],
     generatedAsset: "Generated asset",
     generationSkeletonTitle: "Composing candidates",
     lineageTitle: "Prompt lineage",
+    nextImage: "Next image",
     noRevisedPrompt: "No revised prompt returned by the model.",
     panelDescription: "Select any result as the source image, keep editing the prompt and parameters, then generate the next branch.",
     panelTitle: "Iteration board",
+    previousImage: "Previous image",
     recipeSuccess: "This result is now the active source image with a remix instruction. Edit prompt/parameters, then generate again.",
     recipesTitle: "Creative moves",
     referenceSuccess: "This result is now the source image for the next generation.",
@@ -177,6 +194,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "Round {round}",
     stageFailed: "Could not set this image as the source image.",
     stageWithRecipe: "Apply move",
+    viewFullSize: "View full size",
+    viewerHint: "← → switch · double-click to zoom · Esc to close",
     recipes: {
       variations: {
         title: "Explore variations",
@@ -206,7 +225,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   zh: {
     activeSource: "当前创作源图",
+    actualSize: "原始尺寸",
     clearSource: "清除创作源图",
+    closeViewer: "关闭查看器",
     continueGeneration: "基于创作源图继续生成",
     copyPrompt: "复制提示词",
     copyPromptFailed: "无法复制提示词。",
@@ -214,13 +235,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "当前提示词",
     emptySelectionDescription: "先生成一组结果，再选择其中一张进行变体、精修、高清化或作为下一轮创作源图。",
     emptySelectionTitle: "还没有选中的图片",
+    fitToScreen: "适应屏幕",
     flowSteps: ["生成候选", "选中最佳图", "选择二创动作", "生成下一轮"],
     generatedAsset: "生成资产",
     generationSkeletonTitle: "正在组织候选图",
     lineageTitle: "提示词链路",
+    nextImage: "下一张",
     noRevisedPrompt: "模型未返回改写后的提示词。",
     panelDescription: "选择任意结果作为创作源图，继续修改提示词和参数，再生成下一条分支。",
     panelTitle: "迭代工作台",
+    previousImage: "上一张",
     recipeSuccess: "这张结果已设为当前创作源图，并叠加了二创指令。继续调整 prompt/参数后再生成。",
     recipesTitle: "二创动作",
     referenceSuccess: "这张结果已设为下一轮创作源图。",
@@ -233,6 +257,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "第 {round} 轮",
     stageFailed: "无法将这张图片设为创作源图。",
     stageWithRecipe: "应用动作",
+    viewFullSize: "查看大图",
+    viewerHint: "← → 翻页 · 双击放大 · Esc 关闭",
     recipes: {
       variations: {
         title: "变体探索",
@@ -262,7 +288,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   "zh-TW": {
     activeSource: "目前創作源圖",
+    actualSize: "原始尺寸",
     clearSource: "清除創作源圖",
+    closeViewer: "關閉檢視器",
     continueGeneration: "基於創作源圖繼續生成",
     copyPrompt: "複製提示詞",
     copyPromptFailed: "無法複製提示詞。",
@@ -270,13 +298,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "目前提示詞",
     emptySelectionDescription: "先生成一組結果，再選擇其中一張進行變體、精修、高清化，或作為下一輪創作源圖。",
     emptySelectionTitle: "尚未選取圖片",
+    fitToScreen: "符合螢幕",
     flowSteps: ["生成候選", "選中最佳圖", "選擇二創動作", "生成下一輪"],
     generatedAsset: "生成資產",
     generationSkeletonTitle: "正在組織候選圖",
     lineageTitle: "提示詞鏈路",
+    nextImage: "下一張",
     noRevisedPrompt: "模型未返回改寫後的提示詞。",
     panelDescription: "選擇任意結果作為創作源圖，繼續修改提示詞和參數，再生成下一條分支。",
     panelTitle: "迭代工作台",
+    previousImage: "上一張",
     recipeSuccess: "這張結果已設為目前創作源圖，並疊加了二創指令。繼續調整 prompt/參數後再生成。",
     recipesTitle: "二創動作",
     referenceSuccess: "這張結果已設為下一輪創作源圖。",
@@ -289,6 +320,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "第 {round} 輪",
     stageFailed: "無法將這張圖片設為創作源圖。",
     stageWithRecipe: "套用動作",
+    viewFullSize: "檢視大圖",
+    viewerHint: "← → 翻頁 · 雙擊放大 · Esc 關閉",
     recipes: {
       variations: {
         title: "變體探索",
@@ -318,7 +351,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   ja: {
     activeSource: "現在のソース画像",
+    actualSize: "原寸大",
     clearSource: "ソース画像を解除",
+    closeViewer: "ビューアを閉じる",
     continueGeneration: "ソース画像から続けて生成",
     copyPrompt: "プロンプトをコピー",
     copyPromptFailed: "プロンプトをコピーできませんでした。",
@@ -326,13 +361,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "現在のプロンプト",
     emptySelectionDescription: "まず一組生成し、結果を選んでバリエーション、レタッチ、高解像度化、または次のソース画像として続けます。",
     emptySelectionTitle: "まだ画像が選択されていません",
+    fitToScreen: "画面に合わせる",
     flowSteps: ["候補を生成", "ベストを選択", "リミックス操作を選択", "次のラウンドを生成"],
     generatedAsset: "生成アセット",
     generationSkeletonTitle: "候補を作成中",
     lineageTitle: "プロンプト履歴",
+    nextImage: "次の画像",
     noRevisedPrompt: "モデルから改訂プロンプトは返されませんでした。",
     panelDescription: "任意の結果をソース画像として選び、プロンプトとパラメータを編集して次の分岐を生成します。",
     panelTitle: "反復ボード",
+    previousImage: "前の画像",
     recipeSuccess: "この結果を現在のソース画像にし、リミックス指示を追加しました。プロンプト/パラメータを調整して再生成してください。",
     recipesTitle: "クリエイティブ操作",
     referenceSuccess: "この結果を次の生成のソース画像にしました。",
@@ -345,6 +383,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "ラウンド {round}",
     stageFailed: "この画像をソース画像に設定できませんでした。",
     stageWithRecipe: "操作を適用",
+    viewFullSize: "拡大表示",
+    viewerHint: "← → 切り替え · ダブルクリックで拡大 · Esc で閉じる",
     recipes: {
       variations: {
         title: "バリエーション探索",
@@ -374,7 +414,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   ko: {
     activeSource: "현재 소스 이미지",
+    actualSize: "원본 크기",
     clearSource: "소스 이미지 지우기",
+    closeViewer: "뷰어 닫기",
     continueGeneration: "소스 이미지에서 이어서 생성",
     copyPrompt: "프롬프트 복사",
     copyPromptFailed: "프롬프트를 복사할 수 없습니다.",
@@ -382,13 +424,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "현재 프롬프트",
     emptySelectionDescription: "먼저 결과 세트를 생성한 뒤, 하나를 선택해 변형, 리터치, 업스케일 또는 다음 소스 이미지로 이어가세요.",
     emptySelectionTitle: "아직 선택한 이미지가 없습니다",
+    fitToScreen: "화면에 맞춤",
     flowSteps: ["후보 생성", "최종안 선택", "리믹스 동작 선택", "다음 라운드 생성"],
     generatedAsset: "생성된 에셋",
     generationSkeletonTitle: "후보 구성 중",
     lineageTitle: "프롬프트 흐름",
+    nextImage: "다음 이미지",
     noRevisedPrompt: "모델이 수정된 프롬프트를 반환하지 않았습니다.",
     panelDescription: "결과를 소스 이미지로 선택하고 프롬프트와 파라미터를 계속 편집한 뒤 다음 분기를 생성하세요.",
     panelTitle: "반복 보드",
+    previousImage: "이전 이미지",
     recipeSuccess: "이 결과가 현재 소스 이미지가 되었고 리믹스 지시가 추가되었습니다. 프롬프트/파라미터를 조정한 뒤 다시 생성하세요.",
     recipesTitle: "크리에이티브 동작",
     referenceSuccess: "이 결과가 다음 생성의 소스 이미지가 되었습니다.",
@@ -401,6 +446,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "{round}라운드",
     stageFailed: "이 이미지를 소스 이미지로 설정할 수 없습니다.",
     stageWithRecipe: "동작 적용",
+    viewFullSize: "크게 보기",
+    viewerHint: "← → 이동 · 더블클릭 확대 · Esc 닫기",
     recipes: {
       variations: {
         title: "변형 탐색",
@@ -430,7 +477,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   es: {
     activeSource: "Imagen fuente activa",
+    actualSize: "Tamaño real",
     clearSource: "Borrar imagen fuente",
+    closeViewer: "Cerrar visor",
     continueGeneration: "Continuar desde la imagen fuente",
     copyPrompt: "Copiar prompt",
     copyPromptFailed: "No se pudo copiar el prompt.",
@@ -438,13 +487,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "Prompt actual",
     emptySelectionDescription: "Genera primero un conjunto y elige un resultado para remezclar, mejorar, retocar o usar como la siguiente imagen fuente.",
     emptySelectionTitle: "Aún no hay imagen seleccionada",
+    fitToScreen: "Ajustar a pantalla",
     flowSteps: ["Generar opciones", "Elegir ganadora", "Elegir remezcla", "Generar la siguiente ronda"],
     generatedAsset: "Asset generado",
     generationSkeletonTitle: "Componiendo candidatos",
     lineageTitle: "Linaje del prompt",
+    nextImage: "Imagen siguiente",
     noRevisedPrompt: "El modelo no devolvió un prompt revisado.",
     panelDescription: "Selecciona cualquier resultado como imagen fuente, sigue editando el prompt y los parámetros, y genera la siguiente rama.",
     panelTitle: "Panel de iteración",
+    previousImage: "Imagen anterior",
     recipeSuccess: "Este resultado es ahora la imagen fuente activa con una instrucción de remezcla. Edita prompt/parámetros y vuelve a generar.",
     recipesTitle: "Movimientos creativos",
     referenceSuccess: "Este resultado es ahora la imagen fuente para la siguiente generación.",
@@ -457,6 +509,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "Ronda {round}",
     stageFailed: "No se pudo usar esta imagen como imagen fuente.",
     stageWithRecipe: "Aplicar movimiento",
+    viewFullSize: "Ver a tamaño completo",
+    viewerHint: "← → cambiar · doble clic para ampliar · Esc para cerrar",
     recipes: {
       variations: {
         title: "Explorar variaciones",
@@ -486,7 +540,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   fr: {
     activeSource: "Image source active",
+    actualSize: "Taille réelle",
     clearSource: "Effacer l’image source",
+    closeViewer: "Fermer la visionneuse",
     continueGeneration: "Continuer depuis l’image source",
     copyPrompt: "Copier le prompt",
     copyPromptFailed: "Impossible de copier le prompt.",
@@ -494,13 +550,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "Prompt actuel",
     emptySelectionDescription: "Générez d'abord une série, puis choisissez un résultat à remixer, retoucher, améliorer ou utiliser comme prochaine image source.",
     emptySelectionTitle: "Aucune image sélectionnée",
+    fitToScreen: "Ajuster à l’écran",
     flowSteps: ["Générer des options", "Choisir la meilleure", "Choisir un remix", "Générer la suite"],
     generatedAsset: "Asset généré",
     generationSkeletonTitle: "Composition des candidats",
     lineageTitle: "Historique du prompt",
+    nextImage: "Image suivante",
     noRevisedPrompt: "Le modèle n'a pas renvoyé de prompt révisé.",
     panelDescription: "Sélectionnez un résultat comme image source, ajustez le prompt et les paramètres, puis générez la branche suivante.",
     panelTitle: "Tableau d'itération",
+    previousImage: "Image précédente",
     recipeSuccess: "Ce résultat est maintenant l’image source active avec une instruction de remix. Modifiez prompt/paramètres, puis relancez la génération.",
     recipesTitle: "Mouvements créatifs",
     referenceSuccess: "Ce résultat est maintenant l’image source pour la prochaine génération.",
@@ -513,6 +572,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "Tour {round}",
     stageFailed: "Impossible de définir cette image comme image source.",
     stageWithRecipe: "Appliquer le remix",
+    viewFullSize: "Voir en grand",
+    viewerHint: "← → naviguer · double-clic pour zoomer · Échap pour fermer",
     recipes: {
       variations: {
         title: "Explorer des variations",
@@ -542,7 +603,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   de: {
     activeSource: "Aktives Quellbild",
+    actualSize: "Originalgröße",
     clearSource: "Quellbild entfernen",
+    closeViewer: "Viewer schließen",
     continueGeneration: "Vom Quellbild fortsetzen",
     copyPrompt: "Prompt kopieren",
     copyPromptFailed: "Prompt konnte nicht kopiert werden.",
@@ -550,13 +613,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "Aktueller Prompt",
     emptySelectionDescription: "Erzeuge zuerst ein Set und wähle dann ein Ergebnis zum Remixen, Retuschieren, Hochskalieren oder als nächstes Quellbild.",
     emptySelectionTitle: "Noch kein Bild ausgewählt",
+    fitToScreen: "An Bildschirm anpassen",
     flowSteps: ["Optionen erzeugen", "Favorit wählen", "Remix wählen", "Nächste Runde erzeugen"],
     generatedAsset: "Generiertes Asset",
     generationSkeletonTitle: "Kandidaten werden erstellt",
     lineageTitle: "Prompt-Verlauf",
+    nextImage: "Nächstes Bild",
     noRevisedPrompt: "Das Modell hat keinen überarbeiteten Prompt zurückgegeben.",
     panelDescription: "Wähle ein Ergebnis als Quellbild, bearbeite Prompt und Parameter weiter und erzeuge den nächsten Zweig.",
     panelTitle: "Iterationsboard",
+    previousImage: "Vorheriges Bild",
     recipeSuccess: "Dieses Ergebnis ist jetzt das aktive Quellbild mit Remix-Anweisung. Prompt/Parameter anpassen und erneut generieren.",
     recipesTitle: "Kreative Aktionen",
     referenceSuccess: "Dieses Ergebnis ist jetzt das Quellbild für die nächste Generierung.",
@@ -569,6 +635,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "Runde {round}",
     stageFailed: "Dieses Bild konnte nicht als Quellbild gesetzt werden.",
     stageWithRecipe: "Aktion anwenden",
+    viewFullSize: "In voller Größe ansehen",
+    viewerHint: "← → wechseln · Doppelklick zum Zoomen · Esc zum Schließen",
     recipes: {
       variations: {
         title: "Variationen erkunden",
@@ -598,7 +666,9 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
   pt: {
     activeSource: "Imagem fonte ativa",
+    actualSize: "Tamanho real",
     clearSource: "Limpar imagem fonte",
+    closeViewer: "Fechar visualizador",
     continueGeneration: "Continuar da imagem fonte",
     copyPrompt: "Copiar prompt",
     copyPromptFailed: "Não foi possível copiar o prompt.",
@@ -606,13 +676,16 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     currentPrompt: "Prompt atual",
     emptySelectionDescription: "Gere primeiro um conjunto e escolha um resultado para remixar, retocar, ampliar ou usar como a próxima imagem fonte.",
     emptySelectionTitle: "Nenhuma imagem selecionada ainda",
+    fitToScreen: "Ajustar à tela",
     flowSteps: ["Gerar opções", "Escolher a melhor", "Escolher remix", "Gerar a próxima rodada"],
     generatedAsset: "Asset gerado",
     generationSkeletonTitle: "Compondo candidatos",
     lineageTitle: "Histórico do prompt",
+    nextImage: "Próxima imagem",
     noRevisedPrompt: "O modelo não retornou um prompt revisado.",
     panelDescription: "Selecione qualquer resultado como imagem fonte, continue editando o prompt e os parâmetros, e gere o próximo ramo.",
     panelTitle: "Quadro de iteração",
+    previousImage: "Imagem anterior",
     recipeSuccess: "Este resultado agora é a imagem fonte ativa com uma instrução de remix. Edite prompt/parâmetros e gere novamente.",
     recipesTitle: "Movimentos criativos",
     referenceSuccess: "Este resultado agora é a imagem fonte para a próxima geração.",
@@ -625,6 +698,8 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     sourceRound: "Rodada {round}",
     stageFailed: "Não foi possível definir esta imagem como imagem fonte.",
     stageWithRecipe: "Aplicar movimento",
+    viewFullSize: "Ver em tamanho real",
+    viewerHint: "← → alternar · duplo clique para ampliar · Esc para fechar",
     recipes: {
       variations: {
         title: "Explorar variações",
@@ -682,6 +757,7 @@ function getGenerationErrorMessage(error: unknown, fallback: string) {
 type StudioResponse = {
   generation: number
   images: GeneratedImage[]
+  isMock: boolean
   model: string
   outputFormat: string
   prompt: string
@@ -1070,6 +1146,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [progress, setProgress] = useState(0)
   const [result, setResult] = useState<StudioResponse | null>(null)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
   const locale = localeOverride ?? browserLocale
   const text = studioMessages[locale]
@@ -1173,6 +1250,28 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const updatePrompt = useCallback((next: string | ((current: string) => string)) => {
     setCustomPrompt((current) => (typeof next === "function" ? next(current ?? prompt) : next))
   }, [prompt])
+
+  const openViewer = useCallback((index: number) => {
+    setSelectedImageIndex(index)
+    setViewerIndex(index)
+  }, [])
+
+  const closeViewer = useCallback(() => {
+    setViewerIndex(null)
+  }, [])
+
+  const stepViewer = useCallback((step: number) => {
+    const total = result?.images.length || 0
+
+    if (viewerIndex === null || !total) {
+      return
+    }
+
+    const next = (viewerIndex + step + total) % total
+
+    setSelectedImageIndex(next)
+    setViewerIndex(next)
+  }, [result?.images.length, viewerIndex])
 
   const addUploads = useCallback((files: FileList | File[]) => {
     const accepted: UploadPreview[] = []
@@ -1358,7 +1457,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     }
   }
 
-  async function callProxy(requestedCount: number): Promise<{ images: GeneratedImage[] }> {
+  async function callProxy(requestedCount: number): Promise<{ images: GeneratedImage[]; mock: boolean }> {
     const formData = new FormData()
     const requestPrompt = buildRequestPrompt(prompt, activeSource)
 
@@ -1383,6 +1482,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     const payload = (await response.json()) as {
       error?: string
       images?: GeneratedImage[]
+      mock?: boolean
     }
 
     if (!response.ok) {
@@ -1395,6 +1495,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
     return {
       images: payload.images,
+      mock: payload.mock === true,
     }
   }
 
@@ -1420,6 +1521,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     setProgress(8)
     setResult(null)
     setSelectedImageIndex(0)
+    setViewerIndex(null)
 
     const total = Math.min(Math.max(imageCount, 1), 4)
     let firstError: unknown = null
@@ -1428,10 +1530,12 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       const images: GeneratedImage[] = []
       const maxAttempts = total + 2
       let attempts = 0
+      let servedByMock = false
 
       const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
         generation: nextGeneration,
         images: visibleImages,
+        isMock: servedByMock,
         model,
         outputFormat,
         prompt: prompt.trim(),
@@ -1456,6 +1560,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       const runRequest = async () => {
         try {
           const topUp = await callProxy(1)
+
+          servedByMock = servedByMock || topUp.mock
 
           if (images.length < total) {
             images.push(...topUp.images.slice(0, total - images.length))
@@ -1987,6 +2093,11 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                     })
                   : text.readyForNextConcept}
               </span>
+              {result?.isMock && (
+                <Badge variant="outline" className="ml-2 rounded-md bg-muted/40 font-mono text-[10px]">
+                  MOCK
+                </Badge>
+              )}
             </div>
             <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
               <KeyRoundIcon className="size-3" />
@@ -2041,6 +2152,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                             aria-label={`${workflow.selectImage} ${index + 1}`}
                             aria-pressed={isSelected}
                             onClick={() => setSelectedImageIndex(index)}
+                            onDoubleClick={() => openViewer(index)}
                             className="relative cursor-pointer bg-background text-left outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
                           >
                             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2053,9 +2165,6 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                               style={getSizePreviewStyle(result.size)}
                               src={image.src}
                             />
-                            <div className="absolute left-3 top-3 rounded-md bg-background/80 px-2.5 py-1 text-xs font-semibold text-foreground shadow-sm backdrop-blur">
-                              {String(index + 1).padStart(2, "0")}
-                            </div>
                             {isSelected && (
                               <Badge className="absolute right-3 top-3 rounded-md px-3 py-1.5 text-[11px] shadow-xl ring-1 ring-background/70">
                                 <CheckCircle2Icon data-icon="inline-start" />
@@ -2068,6 +2177,21 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                               </div>
                             )}
                           </button>
+
+                          <div className="pointer-events-none absolute left-3 top-3 z-20 flex items-center gap-2">
+                            <span className="rounded-md bg-background/80 px-2.5 py-1 text-xs font-semibold text-foreground shadow-sm backdrop-blur">
+                              {String(index + 1).padStart(2, "0")}
+                            </span>
+                            <button
+                              type="button"
+                              title={workflow.viewFullSize}
+                              aria-label={`${workflow.viewFullSize} ${index + 1}`}
+                              onClick={() => openViewer(index)}
+                              className="pointer-events-auto grid size-7 cursor-pointer place-items-center rounded-md bg-background/80 text-foreground shadow-sm backdrop-blur transition hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none"
+                            >
+                              <Maximize2Icon className="size-3.5" />
+                            </button>
+                          </div>
 
                           <div className="flex flex-col gap-3 border-t px-4 py-3">
                             <div className="flex items-center justify-between gap-3">
@@ -2128,6 +2252,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                   onSelectRecipe={(recipeId) => setGeneratedImageAsSource(selectedImageNumber - 1, recipeId)}
                   onStageReference={() => setGeneratedImageAsSource(selectedImageNumber - 1)}
                   onUseRevisedPrompt={(value) => updatePrompt(value)}
+                  onZoom={() => openViewer(selectedImageNumber - 1)}
                 />
               </div>
             ) : isGenerating ? (
@@ -2178,6 +2303,20 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           )}
         </main>
       </div>
+
+      {result && viewerIndex !== null && viewerIndex < result.images.length && (
+        <ImageViewer
+          images={result.images}
+          index={viewerIndex}
+          outputFormat={result.outputFormat}
+          saveLabel={text.save}
+          size={result.size}
+          workflow={workflow}
+          onClose={closeViewer}
+          onSelect={openViewer}
+          onStep={stepViewer}
+        />
+      )}
     </div>
   )
 }
@@ -2288,6 +2427,291 @@ function PendingImageCard() {
   )
 }
 
+function subscribeToNothing() {
+  return () => {}
+}
+
+type ViewerPan = {
+  originX: number
+  originY: number
+  pointerId: number
+  scrollLeft: number
+  scrollTop: number
+}
+
+function ImageViewer({
+  images,
+  index,
+  outputFormat,
+  saveLabel,
+  size,
+  workflow,
+  onClose,
+  onSelect,
+  onStep,
+}: {
+  images: GeneratedImage[]
+  index: number
+  outputFormat: string
+  saveLabel: string
+  size: string
+  workflow: WorkflowCopy
+  onClose: () => void
+  onSelect: (index: number) => void
+  onStep: (step: number) => void
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  const panRef = useRef<ViewerPan | null>(null)
+  const [zoomedIndex, setZoomedIndex] = useState<number | null>(null)
+  // The portal target only exists in the browser, so the viewer stays empty until mounted.
+  const isMounted = useSyncExternalStore(subscribeToNothing, () => true, () => false)
+  const image = images[index]
+  const total = images.length
+  const hasMultiple = total > 1
+  // Zoom is tracked per image so paging to another result always lands back on fit-to-screen.
+  const isZoomed = zoomedIndex === index
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose()
+        return
+      }
+
+      if (event.key === "ArrowRight") {
+        event.preventDefault()
+        onStep(1)
+        return
+      }
+
+      if (event.key === "ArrowLeft") {
+        event.preventDefault()
+        onStep(-1)
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [onClose, onStep])
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    dialogRef.current?.focus()
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [])
+
+  if (!image || !isMounted) {
+    return null
+  }
+
+  const toggleZoom = () => {
+    setZoomedIndex((current) => (current === index ? null : index))
+  }
+
+  const handleSurfaceClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (isZoomed || (event.target as HTMLElement).tagName === "IMG") {
+      return
+    }
+
+    onClose()
+  }
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const surface = surfaceRef.current
+
+    if (!isZoomed || !surface || event.button !== 0) {
+      return
+    }
+
+    panRef.current = {
+      originX: event.clientX,
+      originY: event.clientY,
+      pointerId: event.pointerId,
+      scrollLeft: surface.scrollLeft,
+      scrollTop: surface.scrollTop,
+    }
+    surface.setPointerCapture(event.pointerId)
+  }
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current
+    const surface = surfaceRef.current
+
+    if (!pan || !surface || pan.pointerId !== event.pointerId) {
+      return
+    }
+
+    surface.scrollLeft = pan.scrollLeft - (event.clientX - pan.originX)
+    surface.scrollTop = pan.scrollTop - (event.clientY - pan.originY)
+  }
+
+  const handlePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const pan = panRef.current
+
+    if (!pan || pan.pointerId !== event.pointerId) {
+      return
+    }
+
+    surfaceRef.current?.releasePointerCapture(event.pointerId)
+    panRef.current = null
+  }
+
+  return createPortal(
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={workflow.viewFullSize}
+      tabIndex={-1}
+      className="fixed inset-0 z-50 flex flex-col bg-background/95 outline-none backdrop-blur-xl"
+    >
+      <div className="flex items-center justify-between gap-3 border-b bg-background/60 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Badge className="rounded-md">
+            {String(index + 1).padStart(2, "0")} / {String(total).padStart(2, "0")}
+          </Badge>
+          <span className="truncate font-mono text-[11px] text-muted-foreground">
+            {outputFormat.toUpperCase()} · {size}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            className="rounded-md"
+            onClick={toggleZoom}
+          >
+            {isZoomed ? (
+              <ZoomOutIcon data-icon="inline-start" />
+            ) : (
+              <ZoomInIcon data-icon="inline-start" />
+            )}
+            <span className="hidden sm:inline">
+              {isZoomed ? workflow.fitToScreen : workflow.actualSize}
+            </span>
+          </Button>
+          <a
+            className={cn(
+              buttonVariants({ size: "lg", variant: "outline" }),
+              "rounded-md bg-muted/40 px-3 text-xs font-semibold"
+            )}
+            download={`imgx-${index + 1}.${outputFormat}`}
+            href={image.src}
+          >
+            <ArrowDownToLineIcon data-icon="inline-start" />
+            <span className="hidden sm:inline">{saveLabel}</span>
+          </a>
+          <Button
+            type="button"
+            size="icon-lg"
+            variant="ghost"
+            className="rounded-md"
+            title={workflow.closeViewer}
+            aria-label={workflow.closeViewer}
+            onClick={onClose}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      </div>
+
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={surfaceRef}
+          className={cn("absolute inset-0", isZoomed ? "overflow-auto" : "overflow-hidden")}
+          onClick={handleSurfaceClick}
+          onDoubleClick={toggleZoom}
+          onPointerCancel={handlePointerEnd}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+        >
+          <div
+            className={cn(
+              "flex items-center justify-center p-4 sm:p-8",
+              isZoomed ? "min-h-full w-max min-w-full" : "h-full w-full"
+            )}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              alt={`${workflow.selectedAsset} ${index + 1}`}
+              className={cn(
+                "select-none shadow-[0_40px_120px_-60px_rgba(0,0,0,1)]",
+                isZoomed
+                  ? "max-w-none cursor-grab active:cursor-grabbing"
+                  : "max-h-full max-w-full cursor-zoom-in object-contain"
+              )}
+              draggable={false}
+              src={image.src}
+            />
+          </div>
+        </div>
+
+        {hasMultiple && (
+          <>
+            <Button
+              type="button"
+              size="icon-lg"
+              variant="secondary"
+              className="absolute left-4 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-lg"
+              title={workflow.previousImage}
+              aria-label={workflow.previousImage}
+              onClick={() => onStep(-1)}
+            >
+              <ChevronLeftIcon />
+            </Button>
+            <Button
+              type="button"
+              size="icon-lg"
+              variant="secondary"
+              className="absolute right-4 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-lg"
+              title={workflow.nextImage}
+              aria-label={workflow.nextImage}
+              onClick={() => onStep(1)}
+            >
+              <ChevronRightIcon />
+            </Button>
+          </>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3 border-t bg-background/60 px-4 py-3">
+        {hasMultiple && (
+          <div className="flex items-center justify-center gap-2 overflow-x-auto">
+            {images.map((item, itemIndex) => (
+              <button
+                key={`${item.src}-${itemIndex}`}
+                type="button"
+                aria-current={itemIndex === index}
+                aria-label={`${workflow.selectImage} ${itemIndex + 1}`}
+                onClick={() => onSelect(itemIndex)}
+                className={cn(
+                  "size-14 shrink-0 cursor-pointer overflow-hidden rounded-md border transition outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  itemIndex === index
+                    ? "border-primary ring-2 ring-primary/30"
+                    : "border-border opacity-55 hover:opacity-100"
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img alt="" className="size-full object-cover" src={item.src} />
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="text-center text-[11px] text-muted-foreground">{workflow.viewerHint}</p>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 function RemixPanel({
   image,
   imageIndex,
@@ -2300,6 +2724,7 @@ function RemixPanel({
   onSelectRecipe,
   onStageReference,
   onUseRevisedPrompt,
+  onZoom,
 }: {
   image: GeneratedImage | null
   imageIndex: number
@@ -2312,6 +2737,7 @@ function RemixPanel({
   onSelectRecipe: (recipeId: RemixRecipeId) => void
   onStageReference: () => void
   onUseRevisedPrompt: (value: string) => void
+  onZoom: () => void
 }) {
   if (!image) {
     return (
@@ -2346,7 +2772,13 @@ function RemixPanel({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-4">
-        <div className="overflow-hidden rounded-lg border bg-background">
+        <button
+          type="button"
+          title={workflow.viewFullSize}
+          aria-label={workflow.viewFullSize}
+          onClick={onZoom}
+          className="group relative block cursor-zoom-in overflow-hidden rounded-lg border bg-background outline-none focus-visible:ring-4 focus-visible:ring-ring/40"
+        >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             alt={`${workflow.selectedAsset} ${imageIndex}`}
@@ -2354,7 +2786,10 @@ function RemixPanel({
             style={getSizePreviewStyle(size)}
             src={image.src}
           />
-        </div>
+          <span className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-background/80 text-foreground shadow-sm backdrop-blur transition group-hover:bg-background">
+            <Maximize2Icon className="size-3.5" />
+          </span>
+        </button>
 
         <div className="grid grid-cols-2 gap-2">
           <Button

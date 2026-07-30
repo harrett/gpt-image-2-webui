@@ -122,6 +122,16 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+### 5. Optional: mock mode for UI work
+
+Real generations take minutes, which makes UI/UX iteration slow. Start the dev server in mock mode instead:
+
+```bash
+npm run dev:mock
+```
+
+`/api/images` then answers with locally rendered placeholder PNGs (correct requested dimensions, ~1s latency) instead of calling the upstream API, and no API key is required. Everything else behaves normally — parallel image slots, retries, progress, iteration board, and the full-size viewer. Mocked runs are tagged with a `MOCK` badge in the canvas header. Tune it with `IMAGE_API_MOCK_DELAY_MS` and `IMAGE_API_MOCK_FAIL_RATE` (see below).
+
 ## How to use
 
 1. Enter a prompt or start from a built-in prompt preset.
@@ -137,6 +147,9 @@ Open [http://localhost:3000](http://localhost:3000).
 | `INTERNAL_IMAGE_API_BASE_URL` | Yes | Server-only upstream image API base URL. Never exposed to the browser; the client cannot configure or override this. |
 | `OPENAI_API_KEY` | No | Used as a fallback when a user hasn't entered their own key in the UI. |
 | `NEXT_ASSET_PREFIX` | No | Sets the static asset prefix for sub-path or CDN deployments. |
+| `IMAGE_API_MOCK` | No | Set to `1` to serve generated placeholder images from `/api/images` without calling the upstream API or requiring a key. Local development only — every result is fake. |
+| `IMAGE_API_MOCK_DELAY_MS` | No | Simulated latency per mock request, in ms (default `900`, jittered ±40%). |
+| `IMAGE_API_MOCK_FAIL_RATE` | No | Fraction of mock requests that fail with a 502, for exercising retry and error states (`0`–`1`, default `0`). |
 
 ## Deploy
 

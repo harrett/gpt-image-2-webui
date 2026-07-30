@@ -9,6 +9,11 @@ import {
   normalizeOpenAIBaseURL,
   scrubUpstreamDetails,
 } from "@/lib/image-request"
+import {
+  createMockImagePayload,
+  isMockImageApiEnabled,
+  shouldFailMockRequest,
+} from "@/lib/mock-image"
 
 export const runtime = "nodejs"
 export const maxDuration = 120
@@ -129,8 +134,13 @@ function getEditSize(formData: FormData) {
 
 export async function POST(request: Request) {
   let locale = resolveLocale(request.headers.get("accept-language"))
+  const mock = isMockImageApiEnabled()
 
-  if (!INTERNAL_IMAGE_API_BASE_URL) {
+  if (mock) {
+    console.warn("[api/images] IMAGE_API_MOCK is on — returning generated placeholders, no upstream call")
+  }
+
+  if (!mock && !INTERNAL_IMAGE_API_BASE_URL) {
     console.error("[api/images] INTERNAL_IMAGE_API_BASE_URL is not configured")
     return NextResponse.json({ error: t(locale, "imageServiceUnavailable") }, { status: 500 })
   }
@@ -148,7 +158,7 @@ export async function POST(request: Request) {
     const apiKey = getText(incomingFormData, "apiKey", process.env.OPENAI_API_KEY || "")
     const prompt = getText(incomingFormData, "prompt")
 
-    if (!apiKey) {
+    if (!mock && !apiKey) {
       return NextResponse.json({ error: t(locale, "proxyApiKeyRequired") }, { status: 400 })
     }
 
@@ -177,51 +187,78 @@ export async function POST(request: Request) {
     }
 
     const model = getText(incomingFormData, "model", "gpt-image-2")
-    const baseURL = normalizeOpenAIBaseURL(INTERNAL_IMAGE_API_BASE_URL, locale)
     const outputFormat = getOutputFormat(incomingFormData)
     const imageCount = Number(getText(incomingFormData, "imageCount", "1"))
     const background = getBackground(incomingFormData)
     const n = Math.min(Math.max(imageCount, 1), 4)
-    const client = new OpenAI({
-      apiKey,
-      baseURL,
-      maxRetries: 0,
-    })
     let payload: unknown
     let requestQuality = "auto"
     let requestSize = "1024x1024"
 
-    if (images.length) {
-      const quality = getEditQuality(incomingFormData)
-      const size = getEditSize(incomingFormData)
+    if (mock) {
+      if (shouldFailMockRequest()) {
+        return NextResponse.json(
+          { error: t(locale, "proxyRequestFailed", { status: 502 }) },
+          { status: 502 }
+        )
+      }
+
+      const quality = images.length
+        ? getEditQuality(incomingFormData)
+        : getGenerateQuality(incomingFormData)
+      const size = images.length ? getEditSize(incomingFormData) : getGenerateSize(incomingFormData)
 
       requestQuality = quality
       requestSize = size
-      payload = await client.images.edit({
+      payload = await createMockImagePayload({
         background,
-        image: images.length === 1 ? images[0] : images,
-        model,
-        n,
-        output_format: outputFormat,
+        imageCount: n,
+        outputFormat,
         prompt,
         quality,
-        size: size as OpenAI.Images.ImageEditParams["size"],
+        referenceCount: images.length,
+        size,
       })
     } else {
-      const quality = getGenerateQuality(incomingFormData)
-      const size = getGenerateSize(incomingFormData)
-
-      requestQuality = quality
-      requestSize = size
-      payload = await client.images.generate({
-        background,
-        model,
-        n,
-        output_format: outputFormat,
-        prompt,
-        quality,
-        size: size as OpenAI.Images.ImageGenerateParams["size"],
+      const baseURL = normalizeOpenAIBaseURL(INTERNAL_IMAGE_API_BASE_URL ?? "", locale)
+      const client = new OpenAI({
+        apiKey,
+        baseURL,
+        maxRetries: 0,
       })
+
+      if (images.length) {
+        const quality = getEditQuality(incomingFormData)
+        const size = getEditSize(incomingFormData)
+
+        requestQuality = quality
+        requestSize = size
+        payload = await client.images.edit({
+          background,
+          image: images.length === 1 ? images[0] : images,
+          model,
+          n,
+          output_format: outputFormat,
+          prompt,
+          quality,
+          size: size as OpenAI.Images.ImageEditParams["size"],
+        })
+      } else {
+        const quality = getGenerateQuality(incomingFormData)
+        const size = getGenerateSize(incomingFormData)
+
+        requestQuality = quality
+        requestSize = size
+        payload = await client.images.generate({
+          background,
+          model,
+          n,
+          output_format: outputFormat,
+          prompt,
+          quality,
+          size: size as OpenAI.Images.ImageGenerateParams["size"],
+        })
+      }
     }
 
     const generatedImages = extractGeneratedImages(payload, outputFormat)
@@ -239,6 +276,7 @@ export async function POST(request: Request) {
       background: getPayloadField(payload, "background"),
       created: getPayloadField(payload, "created"),
       images: generatedImages,
+      mock,
       model,
       outputFormat,
       quality: getPayloadField(payload, "quality") || requestQuality,

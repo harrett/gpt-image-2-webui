@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --webpack",
     "dev:turbo": "next dev --turbopack",
+    "dev:mock": "IMAGE_API_MOCK=1 next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
