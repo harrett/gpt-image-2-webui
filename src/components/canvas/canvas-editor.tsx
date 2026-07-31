@@ -311,7 +311,7 @@ export function CanvasEditor({
       })
 
       const result = await editImage({
-        prompt: buildRevisionPrompt(changes, locale),
+        prompt: buildRevisionPrompt(changes),
         imageDataUrl: exported.url,
         width: current.width,
         height: current.height,
@@ -500,14 +500,25 @@ function getAnnotationTexts(editor: Editor, ids: TLShapeId[]) {
 // preserve subject/composition/aspect/style, and strip the annotation artifacts
 // so they don't survive into the output.
 //
-// The original prompt is deliberately omitted. Passing it made the model treat
-// the call as "render this scene again" — it rewrote the prompt into a fresh
-// generation and returned a near-identical image. The reference image is the
-// context an edit needs.
-function buildRevisionPrompt(changes: string[], locale: Locale) {
+// Deliberately English and deliberately *not* in src/lib/i18n.ts. This is model
+// scaffolding, not UI copy: image models follow English instructions most
+// reliably, and a per-locale copy would be nine strings drifting apart. The
+// user's own annotation text is passed through verbatim in whatever language
+// they wrote it.
+//
+// The original prompt is also omitted. Passing it made the model treat the call
+// as "render this scene again" — it rewrote the prompt into a fresh generation
+// and returned a near-identical image. The reference image is the context an
+// edit needs.
+const REVISION_PROMPT_PREFIX =
+  "Apply these edit instructions to the reference image. The red arrows and their text labels mark exactly where each change goes."
+const REVISION_PROMPT_SUFFIX =
+  "Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: red arrows, labels, blue selection outlines, resize handles, and tool UI. Output only the clean revised image."
+
+function buildRevisionPrompt(changes: string[]) {
   const list = changes.map((change, index) => `${index + 1}. ${change}`).join("\n")
 
-  return `${t(locale, "canvasRevisionPromptPrefix")}\n${list}\n${t(locale, "canvasRevisionPromptSuffix")}`
+  return `${REVISION_PROMPT_PREFIX}\n${list}\n${REVISION_PROMPT_SUFFIX}`
 }
 
 export { ToolbarItem }

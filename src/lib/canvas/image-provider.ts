@@ -25,12 +25,18 @@ import { sizeForCanvasBox } from "@/lib/image-size"
 
 export const DEFAULT_CANVAS_MODEL = "gpt-image-2"
 
-// Mirrors MAX_IMAGE_BYTES in src/app/api/images/route.ts. Reference images over
-// this are rejected server-side with a 400, so we shrink before sending.
+// Mirrors MAX_IMAGE_BYTES in src/app/api/images/route.ts — the hard server-side
+// reject. The soft budget below is what we actually aim for.
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024
-// Also mirrors the route's SUPPORTED_IMAGE_TYPES.
-const SUPPORTED_REFERENCE_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
-const REFERENCE_SHRINK_STEPS = 4
+// Upload is the slowest leg of a revision: it runs on the user's *upstream*
+// bandwidth, which on home connections is a fraction of their download speed.
+// A 10MB reference costs minutes there, so keep references around 1.5MB.
+const TARGET_REFERENCE_BYTES = 1.5 * 1024 * 1024
+// Long-edge cap. Image models resize inputs internally anyway, so pixels beyond
+// this buy nothing but upload seconds. Still large enough that annotation
+// arrows and their labels stay legible.
+const MAX_REFERENCE_EDGE = 1536
+const REFERENCE_QUALITY_STEPS = [0.9, 0.8, 0.7, 0.6]
 
 export type CanvasImageResult = {
   dataUrl: string
@@ -129,21 +135,18 @@ async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: n
 }
 
 /**
- * Make a reference image acceptable to /api/images: a supported MIME type and
- * under the 10MB cap. tldraw exports selections at `pixelRatio: 2` PNG, which
- * blows past 10MB on anything large, so shrink by halving the long edge until
- * it fits rather than failing the request.
+ * Turn a canvas export into a reference upload that is small enough to send
+ * quickly.
+ *
+ * tldraw exports PNG at `pixelRatio: 2`. PNG is lossless, so photographic
+ * content barely compresses: a full-size export runs 8-10MB, which sneaks under
+ * the server's 10MB reject and then takes minutes to upload on a home
+ * connection's upstream. Re-encoding to WebP and capping the long edge cuts
+ * that to roughly a megabyte with no visible loss in the arrows or their
+ * labels — the only detail the model has to read here.
  */
 async function prepareReferenceFile(dataUrl: string) {
   const blob = await dataUrlToBlob(dataUrl)
-  const type = blob.type || mimeTypeForDataUrl(dataUrl)
-
-  if (SUPPORTED_REFERENCE_TYPES.has(type) && blob.size <= MAX_REFERENCE_BYTES) {
-    return new File([blob], `reference.${type === "image/webp" ? "webp" : type === "image/png" ? "png" : "jpg"}`, {
-      type,
-    })
-  }
-
   const bitmap = await createImageBitmap(blob)
   const canvas = document.createElement("canvas")
   const context = canvas.getContext("2d")
@@ -154,26 +157,35 @@ async function prepareReferenceFile(dataUrl: string) {
   }
 
   try {
-    let scale = 1
+    const scale = Math.min(1, MAX_REFERENCE_EDGE / Math.max(bitmap.width, bitmap.height))
 
-    for (let attempt = 0; attempt <= REFERENCE_SHRINK_STEPS; attempt += 1) {
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-      context.clearRect(0, 0, canvas.width, canvas.height)
-      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
 
-      const encoded = await canvasToBlob(canvas, "image/png")
+    let encoded: Blob | null = null
 
-      if (encoded.size <= MAX_REFERENCE_BYTES) {
-        return new File([encoded], "reference.png", { type: "image/png" })
+    for (const quality of REFERENCE_QUALITY_STEPS) {
+      // WebP keeps the alpha channel, unlike JPEG, so transparent-background
+      // sources survive the round trip.
+      encoded = await canvasToBlob(canvas, "image/webp", quality)
+
+      if (encoded.size <= TARGET_REFERENCE_BYTES) {
+        break
       }
-
-      scale *= 0.7
     }
 
-    // Last resort: JPEG drops the alpha channel but is far smaller.
-    const fallback = await canvasToBlob(canvas, "image/jpeg", 0.85)
-    return new File([fallback], "reference.jpg", { type: "image/jpeg" })
+    // Safari before 16 has no WebP encoder and silently hands back a PNG.
+    if (!encoded || encoded.type !== "image/webp") {
+      const jpeg = await canvasToBlob(canvas, "image/jpeg", 0.85)
+      return new File([jpeg], "reference.jpg", { type: "image/jpeg" })
+    }
+
+    if (encoded.size > MAX_REFERENCE_BYTES) {
+      throw new Error("Reference image is too large to upload.")
+    }
+
+    return new File([encoded], "reference.webp", { type: "image/webp" })
   } finally {
     bitmap.close()
   }

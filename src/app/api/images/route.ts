@@ -18,7 +18,7 @@ import {
 } from "@/lib/mock-image"
 
 export const runtime = "nodejs"
-export const maxDuration = 120
+export const maxDuration = 180
 
 // Security: upstream base URL is server-controlled and read from a
 // server-only env var. Never prefix it with NEXT_PUBLIC_, never read it

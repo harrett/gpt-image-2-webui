@@ -119,8 +119,6 @@ const en = {
   canvasPreviousVersion: "Previous version",
   canvasNextVersion: "Next version",
   canvasApplied: "Applied the edited image as a new generation.",
-  canvasRevisionPromptPrefix: "Apply these edit instructions to the reference image. The red arrows and their labels mark exactly where each change goes.",
-  canvasRevisionPromptSuffix: "Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: red arrows, labels, blue selection outlines, resize handles, and tool UI. Output only the clean revised image.",
 } as const
 
 export type StudioMessages = { [Key in keyof typeof en]: string }
@@ -226,8 +224,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "上一个版本",
     canvasNextVersion: "下一个版本",
     canvasApplied: "已把编辑后的图片作为新一代结果。",
-    canvasRevisionPromptPrefix: "对参考图应用以下修改指令。图中的红色箭头及其文字标签精确标出了每处改动的位置。",
-    canvasRevisionPromptSuffix: "保持原有的主体、构图、宽高比和风格不变。输出中必须去掉所有标注痕迹：红色箭头、文字标签、蓝色选中框、缩放手柄和工具界面。只输出干净的修改后图片。",
   },
   "zh-TW": {
     metadataTitle: "ImgX Studio｜AI 圖片工作台",
@@ -327,8 +323,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "上一個版本",
     canvasNextVersion: "下一個版本",
     canvasApplied: "已把編輯後的圖片作為新一代結果。",
-    canvasRevisionPromptPrefix: "對參考圖套用以下修改指令。圖中的紅色箭頭及其文字標籤精確標出了每處改動的位置。",
-    canvasRevisionPromptSuffix: "保持原有的主體、構圖、寬高比和風格不變。輸出中必須去掉所有標註痕跡：紅色箭頭、文字標籤、藍色選取框、縮放控制點和工具介面。只輸出乾淨的修改後圖片。",
   },
   ja: {
     metadataTitle: "ImgX Studio | AI画像ワークスペース",
@@ -428,8 +422,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "前のバージョン",
     canvasNextVersion: "次のバージョン",
     canvasApplied: "編集後の画像を新しい世代として保存しました。",
-    canvasRevisionPromptPrefix: "参照画像に次の編集指示を適用してください。赤い矢印とそのラベルが各変更の位置を正確に示しています。",
-    canvasRevisionPromptSuffix: "元の被写体・構図・アスペクト比・スタイルは保持してください。出力からは注釈の痕跡をすべて取り除いてください：赤い矢印、ラベル、青い選択枠、リサイズハンドル、ツールUI。きれいな修正後の画像のみを出力してください。",
   },
   ko: {
     ...en,
@@ -528,8 +520,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "이전 버전",
     canvasNextVersion: "다음 버전",
     canvasApplied: "편집한 이미지를 새 세대 결과로 저장했습니다.",
-    canvasRevisionPromptPrefix: "참조 이미지에 다음 편집 지시를 적용하세요. 빨간 화살표와 라벨이 각 변경 위치를 정확히 표시합니다.",
-    canvasRevisionPromptSuffix: "원래의 피사체, 구도, 종횡비, 스타일을 유지하세요. 출력에서 주석 흔적을 모두 제거하세요: 빨간 화살표, 라벨, 파란 선택 윤곽선, 크기 조절 핸들, 도구 UI. 깨끗하게 수정된 이미지만 출력하세요.",
   },
   es: {
     ...en,
@@ -629,8 +619,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Versión anterior",
     canvasNextVersion: "Versión siguiente",
     canvasApplied: "La imagen editada se guardó como nueva generación.",
-    canvasRevisionPromptPrefix: "Aplica estas instrucciones de edición a la imagen de referencia. Las flechas rojas y sus etiquetas marcan exactamente dónde va cada cambio.",
-    canvasRevisionPromptSuffix: "Conserva el sujeto, la composición, la relación de aspecto y el estilo originales. Elimina del resultado todo rastro de anotación: flechas rojas, etiquetas, contornos de selección azules, manijas de redimensionado e interfaz de herramientas. Devuelve solo la imagen revisada limpia.",
   },
   fr: {
     ...en,
@@ -728,8 +716,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Version précédente",
     canvasNextVersion: "Version suivante",
     canvasApplied: "L'image modifiée a été enregistrée comme nouvelle génération.",
-    canvasRevisionPromptPrefix: "Applique ces instructions de modification à l'image de référence. Les flèches rouges et leurs étiquettes indiquent précisément où va chaque changement.",
-    canvasRevisionPromptSuffix: "Conserve le sujet, la composition, le rapport d'aspect et le style d'origine. Supprime du résultat toute trace d'annotation : flèches rouges, étiquettes, contours de sélection bleus, poignées de redimensionnement et interface d'outils. Ne renvoie que l'image révisée propre.",
   },
   de: {
     ...en,
@@ -827,8 +813,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Vorherige Version",
     canvasNextVersion: "Nächste Version",
     canvasApplied: "Das bearbeitete Bild wurde als neue Generation gespeichert.",
-    canvasRevisionPromptPrefix: "Wende diese Bearbeitungsanweisungen auf das Referenzbild an. Die roten Pfeile und ihre Beschriftungen markieren genau, wo jede Änderung hingehört.",
-    canvasRevisionPromptSuffix: "Erhalte Motiv, Komposition, Seitenverhältnis und Stil des Originals. Entferne alle Anmerkungsspuren aus der Ausgabe: rote Pfeile, Beschriftungen, blaue Auswahlrahmen, Anfasser und Werkzeug-UI. Gib nur das saubere überarbeitete Bild aus.",
   },
   pt: {
     ...en,
@@ -926,8 +910,6 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Versão anterior",
     canvasNextVersion: "Próxima versão",
     canvasApplied: "A imagem editada foi salva como nova geração.",
-    canvasRevisionPromptPrefix: "Aplique estas instruções de edição à imagem de referência. As setas vermelhas e seus rótulos marcam exatamente onde cada alteração vai.",
-    canvasRevisionPromptSuffix: "Preserve o sujeito, a composição, a proporção e o estilo originais. Remova do resultado todos os vestígios de anotação: setas vermelhas, rótulos, contornos de seleção azuis, alças de redimensionamento e interface de ferramentas. Devolva apenas a imagem revisada limpa.",
   },
 }
 
