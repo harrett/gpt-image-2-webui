@@ -20,6 +20,7 @@ import {
   useEditor,
   useValue,
   type Editor,
+  type TLArrowShapeProps,
   type TLShapeId,
   type TLUiOverrides,
 } from "tldraw"
@@ -58,6 +59,89 @@ export function getAnnotationShapeIds(editor: Editor) {
 function unlockGlobalToolLock(editor: Editor) {
   if (!editor.getInstanceState().isToolLocked) return
   editor.updateInstanceState({ isToolLocked: false })
+}
+
+/**
+ * Two store listeners the tool needs to stay usable. Ported from upstream
+ * Cowart's onMount (src/App.jsx).
+ *
+ * 1. Re-arm: finishing a label drops tldraw back to the select tool, so drawing
+ *    a second annotation would silently do nothing until the user clicked the
+ *    toolbar again.
+ * 2. Style sync: the style panel changes `color` but not `labelColor`, and
+ *    tldraw drifts `labelPosition` back toward the arrow's midpoint. Without
+ *    this the label ends up a different color from its arrow, sitting on top of
+ *    whatever the arrow points at.
+ *
+ * Returns a single unsubscribe.
+ */
+export function installAnnotationListeners(editor: Editor) {
+  let isSyncing = false
+
+  const unsubscribeReArm = editor.store.listen(
+    ({ changes }) => {
+      for (const [previous, next] of Object.values(changes.updated)) {
+        if (previous?.typeName !== "instance_page_state") continue
+
+        const wasEditing = (previous as { editingShapeId?: TLShapeId | null }).editingShapeId
+        const isEditing = (next as { editingShapeId?: TLShapeId | null }).editingShapeId
+
+        if (!wasEditing || isEditing) continue
+        if (editor.getShape(wasEditing)?.meta?.[ANNOTATION_ARROW_META_KEY] !== true) continue
+
+        editor.timers.requestAnimationFrame(() => {
+          if (editor.getEditingShapeId()) return
+          if (editor.getCurrentToolId() !== "select") return
+          editor.setCurrentTool(ANNOTATION_TOOL_ID)
+        })
+      }
+    },
+    { source: "all", scope: "session" }
+  )
+
+  const unsubscribeStyleSync = editor.store.listen(
+    ({ changes }) => {
+      if (isSyncing) return
+
+      const updates = []
+
+      for (const [, next] of Object.values(changes.updated)) {
+        if (next?.typeName !== "shape") continue
+        if (next.type !== "arrow") continue
+        if (next.meta?.[ANNOTATION_ARROW_META_KEY] !== true) continue
+
+        const arrowProps = next.props as Partial<TLArrowShapeProps>
+        const props: Partial<TLArrowShapeProps> = {}
+
+        if (arrowProps.color !== arrowProps.labelColor) {
+          props.labelColor = arrowProps.color
+        }
+
+        if (arrowProps.labelPosition !== ANNOTATION_LABEL_POSITION) {
+          props.labelPosition = ANNOTATION_LABEL_POSITION
+        }
+
+        if (!Object.keys(props).length) continue
+
+        updates.push({ id: next.id, type: "arrow" as const, props })
+      }
+
+      if (!updates.length) return
+
+      isSyncing = true
+      try {
+        editor.updateShapes(updates)
+      } finally {
+        isSyncing = false
+      }
+    },
+    { source: "all", scope: "document" }
+  )
+
+  return () => {
+    unsubscribeReArm()
+    unsubscribeStyleSync()
+  }
 }
 
 function getAnnotationColor(editor: Editor) {

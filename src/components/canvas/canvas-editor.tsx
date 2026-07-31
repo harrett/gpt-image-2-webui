@@ -21,10 +21,12 @@ import {
   TextToolbarItem,
   Tldraw,
   createShapeId,
+  renderPlaintextFromRichText,
   type Editor,
   type TLAssetId,
   type TLComponents,
   type TLImageAsset,
+  type TLRichText,
   type TLShapeId,
 } from "tldraw"
 import { ChevronLeftIcon, ChevronRightIcon, LoaderCircleIcon, XIcon } from "lucide-react"
@@ -36,6 +38,7 @@ import {
   ToolbarItem,
   createAnnotationUiOverrides,
   getAnnotationShapeIds,
+  installAnnotationListeners,
 } from "@/components/canvas/annotation-tool"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -262,6 +265,9 @@ export function CanvasEditor({
       }
 
       void seedBoard(editor)
+
+      // onMount's return value is tldraw's cleanup hook.
+      return installAnnotationListeners(editor)
     },
     [seedBoard]
   )
@@ -276,8 +282,13 @@ export function CanvasEditor({
     }
 
     const annotationIds = getAnnotationShapeIds(editor)
+    // Labels also go into the prompt as a fallback for weak OCR, but the pixels
+    // are what localize the edit — see the export below.
+    const changes = [instruction.trim(), ...getAnnotationTexts(editor, annotationIds)].filter(
+      Boolean
+    )
 
-    if (!instruction.trim() && !annotationIds.length) {
+    if (!changes.length) {
       toast.error(t(locale, "canvasInstructionRequired"))
       return
     }
@@ -285,25 +296,22 @@ export function CanvasEditor({
     setIsGenerating(true)
 
     try {
-      const bounds = editor.getShapePageBounds(shapeId)
-
-      if (!bounds) {
-        throw new Error(t(locale, "proxyGenerationFailed"))
-      }
-
-      // Export exactly the image's box so the reference keeps the original
-      // aspect ratio, even when an arrow's label overhangs the artwork.
+      // Rasterize the image *together with* its annotations, over the union of
+      // their bounds. This is the mechanism that makes a local edit local: the
+      // model reads the arrow and its label as pixels and sees exactly which
+      // region they point at. Cropping to the image box instead (to preserve
+      // aspect ratio) cuts off any label drawn beside the artwork and leaves
+      // the model with a bare arrow, which it just renders the scene around.
+      // Matches the upstream Cowart export (lib/selectionExport.js).
       const exported = await editor.toImageDataUrl([shapeId, ...annotationIds], {
         format: "png",
         background: true,
-        bounds,
-        padding: 0,
+        padding: "auto",
         pixelRatio: EXPORT_PIXEL_RATIO,
       })
 
-      const revisionPrompt = buildRevisionPrompt(instruction, source.prompt)
       const result = await editImage({
-        prompt: revisionPrompt,
+        prompt: buildRevisionPrompt(changes, locale),
         imageDataUrl: exported.url,
         width: current.width,
         height: current.height,
@@ -335,7 +343,10 @@ export function CanvasEditor({
           width: result.width,
           height: result.height,
           mimeType: result.mimeType,
-          prompt: revisionPrompt,
+          // The lineage prompt is what the studio shows for this generation, so
+          // it reads as "original intent + what changed" rather than the
+          // edit-only instruction we sent to the model.
+          prompt: [current.prompt, ...changes].filter(Boolean).join("\n\n"),
         },
       ]
 
@@ -474,20 +485,29 @@ export function CanvasEditor({
   )
 }
 
-// Give the model the original intent as context, then the change. Without the
-// original prompt an edit tends to drift away from the image's style.
-function buildRevisionPrompt(instruction: string, originalPrompt: string) {
-  const change = instruction.trim()
+function getAnnotationTexts(editor: Editor, ids: TLShapeId[]) {
+  return ids
+    .map((id) => {
+      const richText = (editor.getShape(id)?.props as { richText?: TLRichText } | undefined)
+        ?.richText
 
-  if (!change) {
-    return originalPrompt
-  }
+      return richText ? renderPlaintextFromRichText(editor, richText).trim() : ""
+    })
+    .filter(Boolean)
+}
 
-  if (!originalPrompt.trim()) {
-    return change
-  }
+// Wording follows upstream Cowart's buildEditPrompt: apply the instructions,
+// preserve subject/composition/aspect/style, and strip the annotation artifacts
+// so they don't survive into the output.
+//
+// The original prompt is deliberately omitted. Passing it made the model treat
+// the call as "render this scene again" — it rewrote the prompt into a fresh
+// generation and returned a near-identical image. The reference image is the
+// context an edit needs.
+function buildRevisionPrompt(changes: string[], locale: Locale) {
+  const list = changes.map((change, index) => `${index + 1}. ${change}`).join("\n")
 
-  return `${originalPrompt.trim()}\n\n${change}`
+  return `${t(locale, "canvasRevisionPromptPrefix")}\n${list}\n${t(locale, "canvasRevisionPromptSuffix")}`
 }
 
 export { ToolbarItem }
