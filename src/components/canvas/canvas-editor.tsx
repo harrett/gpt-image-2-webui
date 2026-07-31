@@ -60,11 +60,43 @@ export type CanvasEditorSource = {
 }
 
 type Version = {
+  // Every version owns an asset record. Mutating one asset's `src` instead
+  // looks equivalent but does not repaint: tldraw's useImageOrVideoAsset only
+  // re-resolves immediately when the *assetId* changes — a same-asset content
+  // change is deferred behind a ~500ms tick debounce that never fires while the
+  // editor sits idle, so switching versions from the header left the old
+  // picture on screen.
+  assetId: TLAssetId
   dataUrl: string
   width: number
   height: number
   mimeType: string
   prompt: string
+}
+
+function createVersionAsset(
+  editor: Editor,
+  { dataUrl, width, height, mimeType }: Omit<Version, "assetId" | "prompt">
+) {
+  const assetId = AssetRecordType.createId()
+  const asset: TLImageAsset = {
+    id: assetId,
+    typeName: "asset",
+    type: "image",
+    meta: {},
+    props: {
+      name: "version.png",
+      src: dataUrl,
+      w: width,
+      h: height,
+      mimeType,
+      isAnimated: false,
+    },
+  }
+
+  editor.createAssets([asset])
+
+  return assetId
 }
 
 export type CanvasEditorProps = {
@@ -83,7 +115,7 @@ export function CanvasEditor({
   onClose,
 }: CanvasEditorProps) {
   const editorRef = useRef<Editor | null>(null)
-  const assetIdRef = useRef<TLAssetId | null>(null)
+  const seededEditorRef = useRef<Editor | null>(null)
   const shapeIdRef = useRef<TLShapeId | null>(null)
   // Mirrors `versions` so board updates can read the list without going through
   // a state updater — mutating the editor from inside one runs during React's
@@ -121,42 +153,39 @@ export function CanvasEditor({
 
   const showVersion = useCallback((index: number, list: Version[] = versionsRef.current) => {
     const editor = editorRef.current
-    const assetId = assetIdRef.current
     const shapeId = shapeIdRef.current
     const version = list[index]
 
     setVersionIndex(index)
 
-    if (!editor || !assetId || !shapeId || !version) {
+    if (!editor || !shapeId || !version) {
       return
     }
 
     const shape = editor.getShape(shapeId)
     const displayWidth = (shape?.props as { w?: number } | undefined)?.w ?? version.width
 
-    // updateAssets only spreads at the record level, so a partial `props` wipes
-    // the fields it omits and fails validation. Always pass the whole object.
-    editor.updateAssets([
-      {
-        id: assetId,
-        type: "image",
-        props: {
-          name: "source.png",
-          src: version.dataUrl,
-          w: version.width,
-          h: version.height,
-          mimeType: version.mimeType,
-          isAnimated: false,
-        },
+    // Point the shape at that version's asset. Keep the on-canvas width stable
+    // so swapping versions doesn't make the image jump; only the height follows
+    // the new aspect ratio.
+    //
+    // ignoreShapeLock is required: the base image is locked so that dragging
+    // draws annotations instead of moving the artwork, and updateShapes()
+    // silently skips locked shapes — without this the swap is a no-op and the
+    // previous version stays on screen.
+    editor.run(
+      () => {
+        editor.updateShape({
+          id: shapeId,
+          type: "image",
+          props: {
+            assetId: version.assetId,
+            h: (displayWidth * version.height) / version.width,
+          },
+        })
       },
-    ])
-    // Keep the on-canvas width stable so swapping versions doesn't make the
-    // image jump; only the height follows the new aspect ratio.
-    editor.updateShape({
-      id: shapeId,
-      type: "image",
-      props: { h: (displayWidth * version.height) / version.width },
-    })
+      { ignoreShapeLock: true }
+    )
   }, [])
 
   const seedBoard = useCallback(
@@ -164,28 +193,16 @@ export function CanvasEditor({
       try {
         const dataUrl = await ensureDataUrl(image.src)
         const size = await measureDataUrl(dataUrl)
-        const assetId = AssetRecordType.createId()
         const shapeId = createShapeId()
+        const assetId = createVersionAsset(editor, {
+          dataUrl,
+          width: size.width,
+          height: size.height,
+          mimeType: "image/png",
+        })
 
-        assetIdRef.current = assetId
         shapeIdRef.current = shapeId
 
-        const asset: TLImageAsset = {
-          id: assetId,
-          typeName: "asset",
-          type: "image",
-          meta: {},
-          props: {
-            name: "source.png",
-            src: dataUrl,
-            w: size.width,
-            h: size.height,
-            mimeType: "image/png",
-            isAnimated: false,
-          },
-        }
-
-        editor.createAssets([asset])
         editor.createShape({
           id: shapeId,
           type: "image",
@@ -201,6 +218,7 @@ export function CanvasEditor({
 
         commitVersions([
           {
+            assetId,
             dataUrl,
             width: size.width,
             height: size.height,
@@ -222,6 +240,27 @@ export function CanvasEditor({
   const handleMount = useCallback(
     (editor: Editor) => {
       editorRef.current = editor
+
+      // StrictMode (and Fast Refresh) re-run effects against the *same* editor,
+      // so onMount fires more than once and we would stack a second copy of the
+      // image on top of the first. The guard has to be synchronous: seedBoard
+      // awaits before it creates anything, so two concurrent calls would both
+      // sail past a check made inside it.
+      if (seededEditorRef.current === editor) {
+        return
+      }
+
+      seededEditorRef.current = editor
+
+      if (process.env.NODE_ENV !== "production") {
+        // Fastest way to inspect board state from the browser console.
+        ;(window as unknown as { __imgxCanvas?: unknown }).__imgxCanvas = {
+          editor,
+          getVersions: () => versionsRef.current,
+          getShapeId: () => shapeIdRef.current,
+        }
+      }
+
       void seedBoard(editor)
     },
     [seedBoard]
@@ -286,6 +325,12 @@ export function CanvasEditor({
       const nextVersions = [
         ...versionsRef.current.slice(0, versionIndex + 1),
         {
+          assetId: createVersionAsset(editor, {
+            dataUrl: result.dataUrl,
+            width: result.width,
+            height: result.height,
+            mimeType: result.mimeType,
+          }),
           dataUrl: result.dataUrl,
           width: result.width,
           height: result.height,
@@ -322,16 +367,27 @@ export function CanvasEditor({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // Only bail out on Escape when the canvas isn't busy with a text label or
-      // an in-flight request, so it never discards work mid-edit.
-      if (event.key === "Escape" && !isGenerating && !editorRef.current?.getEditingShapeId()) {
-        onClose()
+      if (event.key !== "Escape" || isGenerating) {
+        return
       }
+
+      const editor = editorRef.current
+
+      // Escape belongs to tldraw first: it finishes a label, cancels a drag, or
+      // clears the selection. Closing the whole editor is only the *idle*
+      // meaning of the key, otherwise one Escape would discard the annotation
+      // the user was still typing. The listener runs in the capture phase so
+      // these checks see the state before tldraw resets it.
+      if (editor?.getEditingShapeId() || editor?.getSelectedShapeIds().length) {
+        return
+      }
+
+      onClose()
     }
 
-    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("keydown", handleKeyDown, true)
 
-    return () => window.removeEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
   }, [isGenerating, onClose])
 
   const hasRevisions = versions.length > 1

@@ -2342,7 +2342,9 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                                 </Badge>
                               )}
                             </div>
-                            <div className="grid grid-cols-3 gap-2">
+                            {/* Two columns keep the labels readable at card
+                                width; the download spans the second row. */}
+                            <div className="grid grid-cols-2 gap-2">
                               <Button
                                 type="button"
                                 size="sm"
@@ -2366,7 +2368,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                               <a
                                 className={cn(
                                   buttonVariants({ size: "sm", variant: "outline" }),
-                                  "h-9 rounded-md bg-muted/40 px-3 text-xs font-semibold"
+                                  "col-span-2 h-9 rounded-md bg-muted/40 px-3 text-xs font-semibold"
                                 )}
                                 download={`imgx-${index + 1}.${result.outputFormat}`}
                                 href={image.src}
