@@ -12,6 +12,7 @@ import {
   CopyPlusIcon,
   EyeIcon,
   EyeOffIcon,
+  HistoryIcon,
   ImagePlusIcon,
   KeyRoundIcon,
   LanguagesIcon,
@@ -99,6 +100,9 @@ const LEGACY_ENDPOINT_KEY = "imgx.endpoint"
 const optionGroupClassName = "studio-option-group"
 const optionItemClassName = "studio-option-item h-8 text-xs hover:bg-muted"
 const CUSTOM_SIZE_OPTION_VALUE = "custom"
+// Canvases hold base64 image payloads, so this cap is a memory budget as much as
+// a UI one: ~4 images per canvas at up to ~550KB each for 4K renders.
+const MAX_HISTORY_CANVASES = 12
 const DEFAULT_SIZE = "1024x1024"
 const DEFAULT_CUSTOM_SIZE = "1280x720"
 const MIN_CUSTOM_DIMENSION = 64
@@ -132,6 +136,13 @@ type WorkflowCopy = {
   flowSteps: string[]
   generatedAsset: string
   generationSkeletonTitle: string
+  historyBackToLatest: string
+  historyLatestBadge: string
+  historyPending: string
+  historyRestore: string
+  historyRestored: string
+  historyTitle: string
+  historyViewing: string
   lineageTitle: string
   nextImage: string
   noRevisedPrompt: string
@@ -176,6 +187,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["Generate options", "Select a winner", "Choose a remix move", "Generate the next round"],
     generatedAsset: "Generated asset",
     generationSkeletonTitle: "Composing candidates",
+    historyBackToLatest: "Back to latest",
+    historyLatestBadge: "Latest",
+    historyPending: "Generating",
+    historyRestore: "Restore these settings",
+    historyRestored: "Prompt and settings restored from this canvas.",
+    historyTitle: "Canvas history",
+    historyViewing: "Viewing an earlier canvas",
     lineageTitle: "Prompt lineage",
     nextImage: "Next image",
     noRevisedPrompt: "No revised prompt returned by the model.",
@@ -195,7 +213,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "Could not set this image as the source image.",
     stageWithRecipe: "Apply move",
     viewFullSize: "View full size",
-    viewerHint: "← → switch · double-click to zoom · Esc to close",
+    viewerHint: "← → switch · click to zoom in/out · Esc to close",
     recipes: {
       variations: {
         title: "Explore variations",
@@ -239,6 +257,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["生成候选", "选中最佳图", "选择二创动作", "生成下一轮"],
     generatedAsset: "生成资产",
     generationSkeletonTitle: "正在组织候选图",
+    historyBackToLatest: "回到最新",
+    historyLatestBadge: "最新",
+    historyPending: "生成中",
+    historyRestore: "恢复该轮参数",
+    historyRestored: "已恢复该画布的提示词与参数。",
+    historyTitle: "历史画布",
+    historyViewing: "正在查看历史画布",
     lineageTitle: "提示词链路",
     nextImage: "下一张",
     noRevisedPrompt: "模型未返回改写后的提示词。",
@@ -258,7 +283,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "无法将这张图片设为创作源图。",
     stageWithRecipe: "应用动作",
     viewFullSize: "查看大图",
-    viewerHint: "← → 翻页 · 双击放大 · Esc 关闭",
+    viewerHint: "← → 翻页 · 单击放大/缩小 · Esc 关闭",
     recipes: {
       variations: {
         title: "变体探索",
@@ -302,6 +327,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["生成候選", "選中最佳圖", "選擇二創動作", "生成下一輪"],
     generatedAsset: "生成資產",
     generationSkeletonTitle: "正在組織候選圖",
+    historyBackToLatest: "回到最新",
+    historyLatestBadge: "最新",
+    historyPending: "生成中",
+    historyRestore: "還原該輪參數",
+    historyRestored: "已還原該畫布的提示詞與參數。",
+    historyTitle: "歷史畫布",
+    historyViewing: "正在檢視歷史畫布",
     lineageTitle: "提示詞鏈路",
     nextImage: "下一張",
     noRevisedPrompt: "模型未返回改寫後的提示詞。",
@@ -321,7 +353,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "無法將這張圖片設為創作源圖。",
     stageWithRecipe: "套用動作",
     viewFullSize: "檢視大圖",
-    viewerHint: "← → 翻頁 · 雙擊放大 · Esc 關閉",
+    viewerHint: "← → 翻頁 · 單擊放大/縮小 · Esc 關閉",
     recipes: {
       variations: {
         title: "變體探索",
@@ -365,6 +397,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["候補を生成", "ベストを選択", "リミックス操作を選択", "次のラウンドを生成"],
     generatedAsset: "生成アセット",
     generationSkeletonTitle: "候補を作成中",
+    historyBackToLatest: "最新に戻る",
+    historyLatestBadge: "最新",
+    historyPending: "生成中",
+    historyRestore: "この回の設定を復元",
+    historyRestored: "このキャンバスのプロンプトと設定を復元しました。",
+    historyTitle: "キャンバス履歴",
+    historyViewing: "過去のキャンバスを表示中",
     lineageTitle: "プロンプト履歴",
     nextImage: "次の画像",
     noRevisedPrompt: "モデルから改訂プロンプトは返されませんでした。",
@@ -384,7 +423,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "この画像をソース画像に設定できませんでした。",
     stageWithRecipe: "操作を適用",
     viewFullSize: "拡大表示",
-    viewerHint: "← → 切り替え · ダブルクリックで拡大 · Esc で閉じる",
+    viewerHint: "← → 切り替え · クリックで拡大/縮小 · Esc で閉じる",
     recipes: {
       variations: {
         title: "バリエーション探索",
@@ -428,6 +467,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["후보 생성", "최종안 선택", "리믹스 동작 선택", "다음 라운드 생성"],
     generatedAsset: "생성된 에셋",
     generationSkeletonTitle: "후보 구성 중",
+    historyBackToLatest: "최신으로",
+    historyLatestBadge: "최신",
+    historyPending: "생성 중",
+    historyRestore: "이 회차 설정 복원",
+    historyRestored: "이 캔버스의 프롬프트와 설정을 복원했습니다.",
+    historyTitle: "캔버스 기록",
+    historyViewing: "이전 캔버스를 보는 중",
     lineageTitle: "프롬프트 흐름",
     nextImage: "다음 이미지",
     noRevisedPrompt: "모델이 수정된 프롬프트를 반환하지 않았습니다.",
@@ -447,7 +493,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "이 이미지를 소스 이미지로 설정할 수 없습니다.",
     stageWithRecipe: "동작 적용",
     viewFullSize: "크게 보기",
-    viewerHint: "← → 이동 · 더블클릭 확대 · Esc 닫기",
+    viewerHint: "← → 이동 · 클릭으로 확대/축소 · Esc 닫기",
     recipes: {
       variations: {
         title: "변형 탐색",
@@ -491,6 +537,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["Generar opciones", "Elegir ganadora", "Elegir remezcla", "Generar la siguiente ronda"],
     generatedAsset: "Asset generado",
     generationSkeletonTitle: "Componiendo candidatos",
+    historyBackToLatest: "Volver al último",
+    historyLatestBadge: "Último",
+    historyPending: "Generando",
+    historyRestore: "Restaurar estos ajustes",
+    historyRestored: "Prompt y ajustes restaurados desde este lienzo.",
+    historyTitle: "Historial de lienzos",
+    historyViewing: "Viendo un lienzo anterior",
     lineageTitle: "Linaje del prompt",
     nextImage: "Imagen siguiente",
     noRevisedPrompt: "El modelo no devolvió un prompt revisado.",
@@ -510,7 +563,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "No se pudo usar esta imagen como imagen fuente.",
     stageWithRecipe: "Aplicar movimiento",
     viewFullSize: "Ver a tamaño completo",
-    viewerHint: "← → cambiar · doble clic para ampliar · Esc para cerrar",
+    viewerHint: "← → cambiar · clic para ampliar/reducir · Esc para cerrar",
     recipes: {
       variations: {
         title: "Explorar variaciones",
@@ -554,6 +607,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["Générer des options", "Choisir la meilleure", "Choisir un remix", "Générer la suite"],
     generatedAsset: "Asset généré",
     generationSkeletonTitle: "Composition des candidats",
+    historyBackToLatest: "Revenir au dernier",
+    historyLatestBadge: "Dernier",
+    historyPending: "Génération",
+    historyRestore: "Restaurer ces réglages",
+    historyRestored: "Prompt et réglages restaurés depuis ce canevas.",
+    historyTitle: "Historique des canevas",
+    historyViewing: "Consultation d'un canevas précédent",
     lineageTitle: "Historique du prompt",
     nextImage: "Image suivante",
     noRevisedPrompt: "Le modèle n'a pas renvoyé de prompt révisé.",
@@ -573,7 +633,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "Impossible de définir cette image comme image source.",
     stageWithRecipe: "Appliquer le remix",
     viewFullSize: "Voir en grand",
-    viewerHint: "← → naviguer · double-clic pour zoomer · Échap pour fermer",
+    viewerHint: "← → naviguer · clic pour zoomer/dézoomer · Échap pour fermer",
     recipes: {
       variations: {
         title: "Explorer des variations",
@@ -617,6 +677,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["Optionen erzeugen", "Favorit wählen", "Remix wählen", "Nächste Runde erzeugen"],
     generatedAsset: "Generiertes Asset",
     generationSkeletonTitle: "Kandidaten werden erstellt",
+    historyBackToLatest: "Zurück zum neuesten",
+    historyLatestBadge: "Neuestes",
+    historyPending: "Wird erzeugt",
+    historyRestore: "Diese Einstellungen wiederherstellen",
+    historyRestored: "Prompt und Einstellungen aus dieser Leinwand wiederhergestellt.",
+    historyTitle: "Leinwand-Verlauf",
+    historyViewing: "Frühere Leinwand wird angezeigt",
     lineageTitle: "Prompt-Verlauf",
     nextImage: "Nächstes Bild",
     noRevisedPrompt: "Das Modell hat keinen überarbeiteten Prompt zurückgegeben.",
@@ -636,7 +703,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "Dieses Bild konnte nicht als Quellbild gesetzt werden.",
     stageWithRecipe: "Aktion anwenden",
     viewFullSize: "In voller Größe ansehen",
-    viewerHint: "← → wechseln · Doppelklick zum Zoomen · Esc zum Schließen",
+    viewerHint: "← → wechseln · Klick zum Zoomen · Esc zum Schließen",
     recipes: {
       variations: {
         title: "Variationen erkunden",
@@ -680,6 +747,13 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     flowSteps: ["Gerar opções", "Escolher a melhor", "Escolher remix", "Gerar a próxima rodada"],
     generatedAsset: "Asset gerado",
     generationSkeletonTitle: "Compondo candidatos",
+    historyBackToLatest: "Voltar ao mais recente",
+    historyLatestBadge: "Mais recente",
+    historyPending: "Gerando",
+    historyRestore: "Restaurar estas configurações",
+    historyRestored: "Prompt e configurações restaurados desta tela.",
+    historyTitle: "Histórico de telas",
+    historyViewing: "Visualizando uma tela anterior",
     lineageTitle: "Histórico do prompt",
     nextImage: "Próxima imagem",
     noRevisedPrompt: "O modelo não retornou um prompt revisado.",
@@ -699,7 +773,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     stageFailed: "Não foi possível definir esta imagem como imagem fonte.",
     stageWithRecipe: "Aplicar movimento",
     viewFullSize: "Ver em tamanho real",
-    viewerHint: "← → alternar · duplo clique para ampliar · Esc para fechar",
+    viewerHint: "← → alternar · clique para ampliar/reduzir · Esc para fechar",
     recipes: {
       variations: {
         title: "Explorar variações",
@@ -755,7 +829,10 @@ function getGenerationErrorMessage(error: unknown, fallback: string) {
 }
 
 type StudioResponse = {
+  background: string
+  createdAt: number
   generation: number
+  id: string
   images: GeneratedImage[]
   isMock: boolean
   model: string
@@ -763,6 +840,8 @@ type StudioResponse = {
   prompt: string
   quality: string
   requestedCount: number
+  // Session-scoped running number; stays stable when older canvases are trimmed.
+  serial: number
   size: string
   sourceLabel?: string
 }
@@ -1120,6 +1199,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const activeSourceRef = useRef<ActiveSource | null>(null)
   const uploadsRef = useRef<UploadPreview[]>([])
   const progressResetTimeoutRef = useRef<number | null>(null)
+  const canvasSerialRef = useRef(0)
   const referenceDropDepthRef = useRef(0)
   const browserLocale = useSyncExternalStore(
     subscribeToLocalePreferenceChange,
@@ -1144,7 +1224,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [imageCount, setImageCount] = useState(1)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [result, setResult] = useState<StudioResponse | null>(null)
+  const [canvases, setCanvases] = useState<StudioResponse[]>([])
+  const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
@@ -1176,6 +1257,11 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       ? `${customSizeValue} · ${text.aspectCustom}`
       : text.customAspectDescription
     : selectedSizeOption.label
+  const result = useMemo(
+    () => canvases.find((canvas) => canvas.id === activeCanvasId) || null,
+    [activeCanvasId, canvases]
+  )
+  const isViewingHistory = Boolean(result) && canvases[0]?.id !== result?.id
   const selectedImage = result?.images[selectedImageIndex] || result?.images[0] || null
   const selectedImageNumber = selectedImage ? Math.min(selectedImageIndex, (result?.images.length || 1) - 1) + 1 : 0
   const inputUploads = activeSource ? [activeSource.upload, ...uploads] : uploads
@@ -1250,6 +1336,48 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const updatePrompt = useCallback((next: string | ((current: string) => string)) => {
     setCustomPrompt((current) => (typeof next === "function" ? next(current ?? prompt) : next))
   }, [prompt])
+
+  const upsertCanvas = useCallback((canvas: StudioResponse) => {
+    setCanvases((current) => {
+      const index = current.findIndex((item) => item.id === canvas.id)
+
+      if (index < 0) {
+        return [canvas, ...current].slice(0, MAX_HISTORY_CANVASES)
+      }
+
+      const next = [...current]
+      next[index] = canvas
+
+      return next
+    })
+    // Don't yank the view away if the user browsed into history mid-generation;
+    // the new canvas is already in the rail, tagged as the latest one.
+    setActiveCanvasId((current) => (current === null || current === canvas.id ? canvas.id : current))
+  }, [])
+
+  const selectCanvas = useCallback((canvasId: string) => {
+    setActiveCanvasId(canvasId)
+    setSelectedImageIndex(0)
+    setViewerIndex(null)
+  }, [])
+
+  const restoreCanvasSettings = useCallback((canvas: StudioResponse) => {
+    setCustomPrompt(canvas.prompt)
+    setModel(canvas.model)
+    setQuality(canvas.quality)
+    setOutputFormat(canvas.outputFormat)
+    setBackground(canvas.background)
+    setImageCount(Math.min(Math.max(canvas.requestedCount, 1), 4))
+
+    if ((PRESET_SIZE_VALUES as readonly string[]).includes(canvas.size)) {
+      setSizeMode(canvas.size as SizeSelectValue)
+    } else {
+      setSizeMode(CUSTOM_SIZE_OPTION_VALUE)
+      setCustomSize(canvas.size)
+    }
+
+    toast.success(workflow.historyRestored)
+  }, [workflow.historyRestored])
 
   const openViewer = useCallback((index: number) => {
     setSelectedImageIndex(index)
@@ -1519,11 +1647,16 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
     setIsGenerating(true)
     setProgress(8)
-    setResult(null)
+    // Detach from any canvas so the skeleton shows; the new canvas only enters
+    // history once it actually has an image, so failed runs leave no empty entry.
+    setActiveCanvasId(null)
     setSelectedImageIndex(0)
     setViewerIndex(null)
 
     const total = Math.min(Math.max(imageCount, 1), 4)
+    const canvasId = crypto.randomUUID()
+    const createdAt = Date.now()
+    const serial = (canvasSerialRef.current += 1)
     let firstError: unknown = null
 
     try {
@@ -1533,7 +1666,10 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       let servedByMock = false
 
       const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
+        background,
+        createdAt,
         generation: nextGeneration,
+        id: canvasId,
         images: visibleImages,
         isMock: servedByMock,
         model,
@@ -1541,6 +1677,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
         prompt: prompt.trim(),
         quality,
         requestedCount: total,
+        serial,
         size,
         sourceLabel: activeSource?.label,
       })
@@ -1552,7 +1689,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           return
         }
 
-        setResult(createResult(visibleImages))
+        upsertCanvas(createResult(visibleImages))
         setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
         setProgress(Math.min(95, 8 + Math.round((visibleImages.length / total) * 87)))
       }
@@ -1589,7 +1726,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
       const visibleImages = images.slice(0, total)
 
-      setResult(createResult(visibleImages))
+      upsertCanvas(createResult(visibleImages))
       setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
       setProgress(100)
 
@@ -2109,6 +2246,51 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
             </div>
           </div>
 
+          {(canvases.length > 0 || isGenerating) && (
+            <CanvasHistoryRail
+              activeCanvasId={activeCanvasId}
+              canvases={canvases}
+              isGenerating={isGenerating}
+              locale={locale}
+              workflow={workflow}
+              onSelect={selectCanvas}
+            />
+          )}
+
+          {isViewingHistory && result && (
+            <div className="relative flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-5 py-2.5">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <HistoryIcon className="size-3.5 text-primary" />
+                {workflow.historyViewing}
+                <span className="text-border">·</span>
+                <span className="font-mono">
+                  {workflow.sourceRound.replace("{round}", String(result.generation))}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="rounded-md bg-background/60"
+                  onClick={() => restoreCanvasSettings(result)}
+                >
+                  <RefreshCwIcon data-icon="inline-start" />
+                  {workflow.historyRestore}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="rounded-md"
+                  onClick={() => selectCanvas(canvases[0].id)}
+                >
+                  {workflow.historyBackToLatest}
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="relative flex-1 overflow-y-auto p-5">
             {result?.images.length ? (
               <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -2412,6 +2594,89 @@ function GenerationSkeleton({
   )
 }
 
+function CanvasHistoryRail({
+  activeCanvasId,
+  canvases,
+  isGenerating,
+  locale,
+  workflow,
+  onSelect,
+}: {
+  activeCanvasId: string | null
+  canvases: StudioResponse[]
+  isGenerating: boolean
+  locale: Locale
+  workflow: WorkflowCopy
+  onSelect: (canvasId: string) => void
+}) {
+  return (
+    <div className="relative border-b bg-background/40 px-5 py-3">
+      <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        <HistoryIcon className="size-3.5 text-primary" />
+        {workflow.historyTitle}
+        <span className="font-mono text-[10px] tracking-normal">
+          {canvases.length}/{MAX_HISTORY_CANVASES}
+        </span>
+      </div>
+
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {isGenerating && (
+          <div className="flex w-[92px] shrink-0 flex-col items-center justify-center gap-1 rounded-md border border-dashed bg-muted/25 py-4 text-[10px] text-muted-foreground">
+            <LoaderCircleIcon className="size-4 animate-spin text-primary" />
+            {workflow.historyPending}
+          </div>
+        )}
+
+        {canvases.map((canvas, index) => {
+          const isActive = canvas.id === activeCanvasId
+          const round = workflow.sourceRound.replace("{round}", String(canvas.generation))
+
+          return (
+            <button
+              key={canvas.id}
+              type="button"
+              aria-current={isActive}
+              aria-label={`${workflow.historyTitle} #${canvas.serial} · ${round} · ×${canvas.images.length}`}
+              title={`#${canvas.serial} · ${round}\n${canvas.prompt}`}
+              onClick={() => onSelect(canvas.id)}
+              className="w-[92px] shrink-0 cursor-pointer text-left outline-none"
+            >
+              <div
+                className={cn(
+                  "relative aspect-square w-full overflow-hidden rounded-md border transition",
+                  isActive
+                    ? "border-primary ring-2 ring-primary/30"
+                    : "border-border opacity-65 hover:opacity-100"
+                )}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img alt="" className="size-full object-cover" src={canvas.images[0]?.src} />
+                <span className="absolute left-1 top-1 rounded bg-background/85 px-1 font-mono text-[9px] text-foreground backdrop-blur">
+                  #{canvas.serial}
+                </span>
+                <span className="absolute right-1 top-1 rounded bg-background/85 px-1 font-mono text-[9px] text-foreground backdrop-blur">
+                  ×{canvas.images.length}
+                </span>
+                {index === 0 && (
+                  <span className="absolute inset-x-1 bottom-1 truncate rounded bg-primary px-1 text-center text-[9px] font-semibold text-primary-foreground">
+                    {workflow.historyLatestBadge}
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+                {new Date(canvas.createdAt).toLocaleTimeString(locale, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function PendingImageCard() {
   return (
     <Card className="overflow-hidden rounded-xl bg-card py-0 shadow-[0_24px_70px_-50px_rgba(0,0,0,0.9)]">
@@ -2430,6 +2695,8 @@ function PendingImageCard() {
 function subscribeToNothing() {
   return () => {}
 }
+
+const DRAG_THRESHOLD = 4
 
 type ViewerPan = {
   originX: number
@@ -2462,7 +2729,9 @@ function ImageViewer({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null)
   const surfaceRef = useRef<HTMLDivElement>(null)
+  const imageRef = useRef<HTMLImageElement>(null)
   const panRef = useRef<ViewerPan | null>(null)
+  const draggedRef = useRef(false)
   const [zoomedIndex, setZoomedIndex] = useState<number | null>(null)
   // The portal target only exists in the browser, so the viewer stays empty until mounted.
   const isMounted = useSyncExternalStore(subscribeToNothing, () => true, () => false)
@@ -2514,8 +2783,26 @@ function ImageViewer({
     setZoomedIndex((current) => (current === index ? null : index))
   }
 
+  // A pan gesture ends with a click event, so drags past the threshold must not
+  // be mistaken for a click on the image (zoom) or on the backdrop (close).
+  // Hit-test by geometry rather than event.target: while panning holds pointer
+  // capture, the browser retargets the trailing click to the capturing surface.
   const handleSurfaceClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (isZoomed || (event.target as HTMLElement).tagName === "IMG") {
+    if (draggedRef.current) {
+      draggedRef.current = false
+      return
+    }
+
+    const bounds = imageRef.current?.getBoundingClientRect()
+    const onImage =
+      bounds &&
+      event.clientX >= bounds.left &&
+      event.clientX <= bounds.right &&
+      event.clientY >= bounds.top &&
+      event.clientY <= bounds.bottom
+
+    if (onImage) {
+      toggleZoom()
       return
     }
 
@@ -2525,10 +2812,11 @@ function ImageViewer({
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const surface = surfaceRef.current
 
-    if (!isZoomed || !surface || event.button !== 0) {
+    if (!surface || event.button !== 0) {
       return
     }
 
+    draggedRef.current = false
     panRef.current = {
       originX: event.clientX,
       originY: event.clientY,
@@ -2536,7 +2824,10 @@ function ImageViewer({
       scrollLeft: surface.scrollLeft,
       scrollTop: surface.scrollTop,
     }
-    surface.setPointerCapture(event.pointerId)
+
+    if (isZoomed) {
+      surface.setPointerCapture(event.pointerId)
+    }
   }
 
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2547,8 +2838,19 @@ function ImageViewer({
       return
     }
 
-    surface.scrollLeft = pan.scrollLeft - (event.clientX - pan.originX)
-    surface.scrollTop = pan.scrollTop - (event.clientY - pan.originY)
+    const deltaX = event.clientX - pan.originX
+    const deltaY = event.clientY - pan.originY
+
+    if (Math.abs(deltaX) > DRAG_THRESHOLD || Math.abs(deltaY) > DRAG_THRESHOLD) {
+      draggedRef.current = true
+    }
+
+    if (!isZoomed) {
+      return
+    }
+
+    surface.scrollLeft = pan.scrollLeft - deltaX
+    surface.scrollTop = pan.scrollTop - deltaY
   }
 
   const handlePointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -2558,7 +2860,10 @@ function ImageViewer({
       return
     }
 
-    surfaceRef.current?.releasePointerCapture(event.pointerId)
+    if (surfaceRef.current?.hasPointerCapture(event.pointerId)) {
+      surfaceRef.current.releasePointerCapture(event.pointerId)
+    }
+
     panRef.current = null
   }
 
@@ -2627,7 +2932,6 @@ function ImageViewer({
           ref={surfaceRef}
           className={cn("absolute inset-0", isZoomed ? "overflow-auto" : "overflow-hidden")}
           onClick={handleSurfaceClick}
-          onDoubleClick={toggleZoom}
           onPointerCancel={handlePointerEnd}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
@@ -2641,11 +2945,12 @@ function ImageViewer({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
+              ref={imageRef}
               alt={`${workflow.selectedAsset} ${index + 1}`}
               className={cn(
                 "select-none shadow-[0_40px_120px_-60px_rgba(0,0,0,1)]",
                 isZoomed
-                  ? "max-w-none cursor-grab active:cursor-grabbing"
+                  ? "max-w-none cursor-zoom-out active:cursor-grabbing"
                   : "max-h-full max-w-full cursor-zoom-in object-contain"
               )}
               draggable={false}
