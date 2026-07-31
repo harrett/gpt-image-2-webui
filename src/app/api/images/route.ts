@@ -8,7 +8,9 @@ import {
   getPayloadField,
   normalizeOpenAIBaseURL,
   scrubUpstreamDetails,
+  type GeneratedImage,
 } from "@/lib/image-request"
+import { normalizeCustomSize } from "@/lib/image-size"
 import {
   createMockImagePayload,
   isMockImageApiEnabled,
@@ -25,8 +27,6 @@ export const maxDuration = 120
 const INTERNAL_IMAGE_API_BASE_URL = process.env.INTERNAL_IMAGE_API_BASE_URL
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
-const MIN_CUSTOM_DIMENSION = 64
-const MAX_CUSTOM_DIMENSION = 8192
 const GENERATE_SIZE_VALUES = new Set([
   "auto",
   "256x256",
@@ -83,29 +83,6 @@ function getGenerateQuality(formData: FormData) {
     : "auto"
 }
 
-function normalizeCustomSize(value: string) {
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, "").replace(/×/g, "x")
-  const match = /^([1-9]\d{1,4})x([1-9]\d{1,4})$/.exec(normalized)
-
-  if (!match) {
-    return ""
-  }
-
-  const width = Number(match[1])
-  const height = Number(match[2])
-
-  if (
-    width < MIN_CUSTOM_DIMENSION ||
-    width > MAX_CUSTOM_DIMENSION ||
-    height < MIN_CUSTOM_DIMENSION ||
-    height > MAX_CUSTOM_DIMENSION
-  ) {
-    return ""
-  }
-
-  return `${width}x${height}`
-}
-
 function getSize(formData: FormData, supportedSizes: Set<string>) {
   const value = getText(formData, "size", "1024x1024")
   const normalizedCustomSize = normalizeCustomSize(value)
@@ -130,6 +107,49 @@ function getGenerateSize(formData: FormData) {
 
 function getEditSize(formData: FormData) {
   return getSize(formData, EDIT_SIZE_VALUES)
+}
+
+// Some OpenAI-compatible providers answer with a hosted `url` instead of
+// `b64_json`. The canvas stores its whole tldraw snapshot (image assets
+// inlined) in IndexedDB, so a remote URL there would rot: the link expires and
+// the browser may not be allowed to re-fetch it cross-origin. Callers that need
+// self-contained bytes opt in with `inlineRemoteImages`.
+//
+// Security note: the URL fetched here comes from the *upstream response*, never
+// from the browser's request body — this does not widen the SSRF surface the
+// way accepting a client-supplied endpoint would.
+async function inlineRemoteImage(image: GeneratedImage): Promise<GeneratedImage> {
+  if (!/^https?:\/\//i.test(image.src)) {
+    return image
+  }
+
+  try {
+    const response = await fetch(image.src)
+
+    if (!response.ok) {
+      return image
+    }
+
+    const contentType = (response.headers.get("content-type") || "").split(";")[0].trim()
+
+    if (!contentType.startsWith("image/")) {
+      return image
+    }
+
+    const buffer = await response.arrayBuffer()
+
+    if (buffer.byteLength > MAX_IMAGE_BYTES) {
+      return image
+    }
+
+    return {
+      ...image,
+      src: `data:${contentType};base64,${Buffer.from(buffer).toString("base64")}`,
+    }
+  } catch {
+    // Best effort only: fall back to the original URL and let the client cope.
+    return image
+  }
 }
 
 export async function POST(request: Request) {
@@ -261,7 +281,11 @@ export async function POST(request: Request) {
       }
     }
 
-    const generatedImages = extractGeneratedImages(payload, outputFormat)
+    const extractedImages = extractGeneratedImages(payload, outputFormat)
+    const generatedImages =
+      getText(incomingFormData, "inlineRemoteImages") === "1"
+        ? await Promise.all(extractedImages.map(inlineRemoteImage))
+        : extractedImages
 
     if (!generatedImages.length) {
       return NextResponse.json(

@@ -1,6 +1,7 @@
 "use client"
 
 import Image from "next/image"
+import dynamic from "next/dynamic"
 import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react"
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
@@ -22,6 +23,7 @@ import {
   MousePointer2Icon,
   PaintbrushIcon,
   PanelRightIcon,
+  PencilRulerIcon,
   PlayIcon,
   RefreshCwIcon,
   ScissorsIcon,
@@ -71,7 +73,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import {
+  clearStoredConnectionPreferences,
+  readStoredConnectionPreferences,
+  writeStoredConnectionPreferences,
+} from "@/lib/connection-preferences"
 import { type GeneratedImage } from "@/lib/image-request"
+import { getSizeDimensions, normalizeCustomSize } from "@/lib/image-size"
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE_KEY,
@@ -93,10 +101,14 @@ import { cn } from "@/lib/utils"
 const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
-const CONNECTION_PREFERENCES_KEY = "imgx.connectionPreferences"
-const LEGACY_API_KEY_KEY = "imgx.apiKey"
-const LEGACY_REMEMBER_KEY_KEY = "imgx.rememberKey"
-const LEGACY_ENDPOINT_KEY = "imgx.endpoint"
+// tldraw is ~1MB and touches window at module scope: keep it out of the studio
+// bundle and off the server render, loading it only when the user opens the
+// detail editor.
+const CanvasEditor = dynamic(
+  () => import("@/components/canvas/canvas-editor").then((mod) => mod.CanvasEditor),
+  { ssr: false }
+)
+
 const optionGroupClassName = "studio-option-group"
 const optionItemClassName = "studio-option-item h-8 text-xs hover:bg-muted"
 const CUSTOM_SIZE_OPTION_VALUE = "custom"
@@ -105,8 +117,6 @@ const CUSTOM_SIZE_OPTION_VALUE = "custom"
 const MAX_HISTORY_CANVASES = 12
 const DEFAULT_SIZE = "1024x1024"
 const DEFAULT_CUSTOM_SIZE = "1280x720"
-const MIN_CUSTOM_DIMENSION = 64
-const MAX_CUSTOM_DIMENSION = 8192
 const PRESET_SIZE_VALUES = [
   "auto",
   "1024x1024",
@@ -859,12 +869,6 @@ type ActiveSource = {
   upload: UploadPreview
 }
 
-type StoredConnectionPreferences = {
-  version: 1
-  remember: boolean
-  apiKey: string
-}
-
 function formatBytes(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
@@ -885,29 +889,6 @@ function getNextSizeMode(value: string | null): SizeSelectValue {
   }
 
   return DEFAULT_SIZE
-}
-
-function normalizeCustomSize(value: string) {
-  const normalized = value.trim().toLowerCase().replace(/\s+/g, "").replace(/×/g, "x")
-  const match = /^([1-9]\d{1,4})x([1-9]\d{1,4})$/.exec(normalized)
-
-  if (!match) {
-    return ""
-  }
-
-  const width = Number(match[1])
-  const height = Number(match[2])
-
-  if (
-    width < MIN_CUSTOM_DIMENSION ||
-    width > MAX_CUSTOM_DIMENSION ||
-    height < MIN_CUSTOM_DIMENSION ||
-    height > MAX_CUSTOM_DIMENSION
-  ) {
-    return ""
-  }
-
-  return `${width}x${height}`
 }
 
 function getWorkflowCopy(locale: Locale) {
@@ -1040,17 +1021,6 @@ function getSizeOptions(locale: Locale) {
   ]
 }
 
-function getSizeDimensions(size: string) {
-  const normalized = normalizeCustomSize(size)
-
-  if (!normalized) {
-    return null
-  }
-
-  const [width, height] = normalized.split("x").map(Number)
-  return { height, width }
-}
-
 function getSizePreviewClass(size: string) {
   if (size === "1024x1536") {
     return "aspect-[2/3]"
@@ -1140,60 +1110,6 @@ function subscribeToLocalePreferenceChange(onStoreChange: () => void) {
   return () => window.removeEventListener("storage", handleStorage)
 }
 
-function readStoredConnectionPreferences(): StoredConnectionPreferences {
-  const storedPreferences = localStorage.getItem(CONNECTION_PREFERENCES_KEY)
-
-  if (storedPreferences) {
-    try {
-      const parsed = JSON.parse(storedPreferences) as Partial<StoredConnectionPreferences>
-
-      if (
-        parsed.version === 1 &&
-        typeof parsed.remember === "boolean" &&
-        typeof parsed.apiKey === "string"
-      ) {
-        return {
-          version: 1,
-          remember: parsed.remember,
-          apiKey: parsed.apiKey,
-        }
-      }
-    } catch {
-      localStorage.removeItem(CONNECTION_PREFERENCES_KEY)
-    }
-  }
-
-  const remember = localStorage.getItem(LEGACY_REMEMBER_KEY_KEY) === "true"
-
-  return {
-    version: 1,
-    remember,
-    apiKey: remember ? localStorage.getItem(LEGACY_API_KEY_KEY) || "" : "",
-  }
-}
-
-function clearStoredConnectionPreferences() {
-  localStorage.removeItem(CONNECTION_PREFERENCES_KEY)
-  localStorage.removeItem(LEGACY_API_KEY_KEY)
-  localStorage.removeItem(LEGACY_REMEMBER_KEY_KEY)
-  localStorage.removeItem(LEGACY_ENDPOINT_KEY)
-}
-
-function writeStoredConnectionPreferences({
-  apiKey,
-}: Pick<StoredConnectionPreferences, "apiKey">) {
-  const preferences: StoredConnectionPreferences = {
-    version: 1,
-    remember: true,
-    apiKey,
-  }
-
-  localStorage.setItem(CONNECTION_PREFERENCES_KEY, JSON.stringify(preferences))
-  localStorage.removeItem(LEGACY_API_KEY_KEY)
-  localStorage.removeItem(LEGACY_REMEMBER_KEY_KEY)
-  localStorage.removeItem(LEGACY_ENDPOINT_KEY)
-}
-
 export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?: Locale }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const activeSourceRef = useRef<ActiveSource | null>(null)
@@ -1229,6 +1145,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
+  const [editorImageIndex, setEditorImageIndex] = useState<number | null>(null)
   const locale = localeOverride ?? browserLocale
   const text = studioMessages[locale]
   const workflow = getWorkflowCopy(locale)
@@ -1574,6 +1491,44 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     } catch (error) {
       toast.error(error instanceof Error ? error.message : workflow.stageFailed)
     }
+  }
+
+  // The detail editor hands back the version the user settled on. It becomes
+  // the next generation of the same lineage rather than a parallel image, so
+  // the canvas rail keeps reading as one image's history.
+  function applyEditedImage({
+    dataUrl,
+    prompt: editedPrompt,
+    revisionCount,
+  }: {
+    dataUrl: string
+    prompt: string
+    revisionCount: number
+  }) {
+    const sourceCanvas = result
+
+    setEditorImageIndex(null)
+
+    if (!sourceCanvas || revisionCount === 0) {
+      return
+    }
+
+    const canvasId = crypto.randomUUID()
+
+    upsertCanvas({
+      ...sourceCanvas,
+      createdAt: Date.now(),
+      generation: sourceCanvas.generation + 1,
+      id: canvasId,
+      images: [{ src: dataUrl }],
+      prompt: editedPrompt,
+      requestedCount: 1,
+      serial: (canvasSerialRef.current += 1),
+      sourceLabel: t(locale, "canvasEditorTitle"),
+    })
+    setActiveCanvasId(canvasId)
+    setSelectedImageIndex(0)
+    toast.success(t(locale, "canvasApplied"))
   }
 
   async function copyPromptToClipboard(value: string) {
@@ -2387,7 +2342,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                                 </Badge>
                               )}
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                               <Button
                                 type="button"
                                 size="sm"
@@ -2397,6 +2352,16 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                               >
                                 <ImagePlusIcon data-icon="inline-start" />
                                 {workflow.setAsSource}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                className="h-9 rounded-md"
+                                onClick={() => setEditorImageIndex(index)}
+                              >
+                                <PencilRulerIcon data-icon="inline-start" />
+                                {text.canvasEditorTitle}
                               </Button>
                               <a
                                 className={cn(
@@ -2497,6 +2462,22 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           onClose={closeViewer}
           onSelect={openViewer}
           onStep={stepViewer}
+        />
+      )}
+
+      {result && editorImageIndex !== null && result.images[editorImageIndex] && (
+        <CanvasEditor
+          image={result.images[editorImageIndex]}
+          locale={locale}
+          source={{
+            background: result.background,
+            model: result.model,
+            outputFormat: result.outputFormat,
+            prompt: result.prompt,
+            quality: result.quality,
+          }}
+          onApply={applyEditedImage}
+          onClose={() => setEditorImageIndex(null)}
         />
       )}
     </div>
