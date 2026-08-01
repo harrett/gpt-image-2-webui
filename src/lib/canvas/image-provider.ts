@@ -18,6 +18,7 @@
 // (generateImage / editImage returning { dataUrl, width, height, mimeType }) so
 // canvas code ported later needs no rewrite.
 
+import { inspectReference } from "@/lib/canvas/debug-reference"
 import { getStoredApiKey } from "@/lib/connection-preferences"
 import { DEFAULT_LOCALE, resolveLocale, t, type Locale } from "@/lib/i18n"
 import type { GeneratedImage } from "@/lib/image-request"
@@ -33,9 +34,12 @@ const MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 // A 10MB reference costs minutes there, so keep references around 1.5MB.
 const TARGET_REFERENCE_BYTES = 1.5 * 1024 * 1024
 // Long-edge cap. Image models resize inputs internally anyway, so pixels beyond
-// this buy nothing but upload seconds. Still large enough that annotation
-// arrows and their labels stay legible.
-const MAX_REFERENCE_EDGE = 1536
+// this buy nothing but upload seconds. Kept generous because the export covers
+// the *union* of the image and its annotations: arrows drawn out to the side
+// stretch the long edge, and a tighter cap would shrink the artwork itself
+// below its native resolution and blur the annotation labels the model has to
+// read.
+const MAX_REFERENCE_EDGE = 2048
 const REFERENCE_QUALITY_STEPS = [0.9, 0.8, 0.7, 0.6]
 
 export type CanvasImageResult = {
@@ -225,6 +229,10 @@ async function requestImage({
 
   if (referenceDataUrl) {
     const reference = await prepareReferenceFile(referenceDataUrl)
+
+    // Dev-only: DevTools shows multipart binary parts as "(binary)", so this is
+    // the only way to actually look at what was uploaded.
+    inspectReference(reference)
     formData.append("images", reference, reference.name)
   }
 

@@ -15,12 +15,14 @@ import {
   StateNode,
   TldrawUiMenuToolItem,
   createShapeId,
+  renderPlaintextFromRichText,
   startEditingShapeWithRichText,
   toRichText,
   useEditor,
   useValue,
   type Editor,
   type TLArrowShapeProps,
+  type TLRichText,
   type TLShapeId,
   type TLUiOverrides,
 } from "tldraw"
@@ -54,6 +56,224 @@ export function isAnnotationShapeId(editor: Editor, id: TLShapeId) {
 
 export function getAnnotationShapeIds(editor: Editor) {
   return Array.from(editor.getCurrentPageShapeIds()).filter((id) => isAnnotationShapeId(editor, id))
+}
+
+export function getAnnotationText(editor: Editor, id: TLShapeId) {
+  const richText = (editor.getShape(id)?.props as { richText?: TLRichText } | undefined)?.richText
+
+  return richText ? renderPlaintextFromRichText(editor, richText).trim() : ""
+}
+
+const LABEL_LAYOUT_MAX_FRAMES = 20
+const LABEL_LAYOUT_MIN_FRAMES = 3
+const LABEL_LAYOUT_FRAME_TIMEOUT_MS = 120
+
+// Plain rAF with a timeout, not editor.timers.requestAnimationFrame: the
+// editor's wrapper does not fire reliably here (measured zero callbacks over
+// three seconds), and a promise that never settles would leave the generate
+// button spinning forever.
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    const timeout = window.setTimeout(resolve, LABEL_LAYOUT_FRAME_TIMEOUT_MS)
+
+    window.requestAnimationFrame(() => {
+      window.clearTimeout(timeout)
+      resolve()
+    })
+  })
+}
+
+// Settles on *stability*, not on "changed at all". Adding the number can widen
+// the label and then, a frame later, wrap it onto another line and make it
+// taller. Returning as soon as either dimension moved exported the two-line
+// text inside a one-line box, slicing the glyphs top and bottom.
+async function waitForLabelLayout(editor: Editor, ids: TLShapeId[]) {
+  const read = () =>
+    ids.map((id) => {
+      const bounds = editor.getShapeGeometry(id).bounds
+      return `${bounds.w}x${bounds.h}`
+    })
+
+  let previous = read()
+
+  for (let frame = 0; frame < LABEL_LAYOUT_MAX_FRAMES; frame += 1) {
+    await nextFrame()
+
+    const current = read()
+    const stable = current.every((value, index) => value === previous[index])
+
+    previous = current
+
+    if (frame >= LABEL_LAYOUT_MIN_FRAMES && stable) {
+      return
+    }
+  }
+}
+
+/**
+ * Drop a numbered badge next to each labelled annotation, so the numbers in the
+ * prompt ("1. change the logo") map onto something visible in the reference
+ * image. Without them, two or more annotations are ambiguous: the model reads a
+ * numbered list of instructions and several unnumbered arrows, with no way to
+ * pair them.
+ *
+ * The instruction *text* is deliberately not rendered into the export. tldraw
+ * lays text out in the SVG export using different metrics than it measured the
+ * box with, so any multi-character label comes out wrapped differently and
+ * sliced through the glyphs, top and bottom — measured with Latin and CJK, at
+ * every font and size, and with a standalone text shape instead of the arrow's
+ * label. A single digit is the one thing that cannot wrap, so the badge is
+ * reliable where a sentence is not.
+ *
+ * So the split is: pixels carry *where* (arrow + badge), the prompt carries
+ * *what* (the same numbers, with the user's text verbatim). The arrow's own
+ * label is blanked for the duration of the export, which also keeps mangled
+ * glyphs out of the reference image.
+ *
+ * Only labelled arrows get a badge. A bare arrow carries a location but no
+ * instruction of its own, so numbering it would create a list entry with
+ * nothing in it.
+ *
+ * Returns the numbered arrows in order, the badge ids to include in the export,
+ * and a cleanup to run once the export is captured.
+ */
+export async function numberAnnotationsForExport(editor: Editor, ids: TLShapeId[]) {
+  const labelled = ids
+    .map((id) => ({ id, text: getAnnotationText(editor, id) }))
+    .filter((entry) => entry.text)
+
+  if (!labelled.length) {
+    return { labelled, badgeIds: [] as TLShapeId[], restore: () => {} }
+  }
+
+  // Read the anchors before blanking the labels — the label box collapses once
+  // its text is gone.
+  const anchors = labelled.map((entry) => getLabelBadgeAnchor(editor, entry.id))
+  // Kept paired with its anchor: an arrow whose geometry we cannot read gets no
+  // badge, and a bare id array would then be misaligned with `anchors`.
+  const badges: { id: TLShapeId; anchor: { x: number; y: number } }[] = []
+
+  // history: 'ignore' keeps this out of the undo stack — it is a render detail
+  // of the export, not an edit the user made.
+  editor.run(
+    () => {
+      editor.updateShapes(
+        labelled.map((entry) => ({
+          id: entry.id,
+          type: "arrow" as const,
+          props: { richText: toRichText("") },
+        }))
+      )
+
+      labelled.forEach((entry, index) => {
+        const anchor = anchors[index]
+
+        if (!anchor) {
+          return
+        }
+
+        const badgeId = createShapeId()
+        badges.push({ id: badgeId, anchor })
+
+        editor.createShape({
+          id: badgeId,
+          type: "text",
+          x: anchor.x,
+          y: anchor.y,
+          props: {
+            richText: toRichText(`${index + 1}`),
+            color: ANNOTATION_DEFAULT_COLOR,
+            font: "draw",
+            size: "m",
+            textAlign: "start",
+            autoSize: true,
+            scale: anchor.scale,
+          },
+        })
+      })
+    },
+    { history: "ignore" }
+  )
+
+  const badgeIds = badges.map((badge) => badge.id)
+
+  // Text shapes are measured in the DOM a frame or two after creation; export
+  // before that and the badge renders inside a stale box.
+  await waitForLabelLayout(editor, badgeIds)
+
+  // Now that the badges have a real size, centre them on their anchor. A text
+  // shape's x/y is its top-left corner, so this has to wait for the measure.
+  editor.run(
+    () => {
+      for (const badge of badges) {
+        const bounds = editor.getShapeGeometry(badge.id).bounds
+
+        editor.updateShape({
+          id: badge.id,
+          type: "text",
+          x: badge.anchor.x - bounds.w / 2,
+          y: badge.anchor.y - bounds.h / 2,
+        })
+      }
+    },
+    { history: "ignore" }
+  )
+
+  return {
+    labelled,
+    badgeIds,
+    restore: () => {
+      editor.run(
+        () => {
+          if (badgeIds.length) {
+            editor.deleteShapes(badgeIds)
+          }
+
+          editor.updateShapes(
+            labelled.map((entry) => ({
+              id: entry.id,
+              type: "arrow" as const,
+              props: { richText: toRichText(entry.text) },
+            }))
+          )
+        },
+        { history: "ignore" }
+      )
+    },
+  }
+}
+
+const BADGE_GAP = 18
+
+// Anchor the badge just behind the arrow's tail, pushed further out along the
+// arrow's own axis. Anchoring to the label box instead put the number at the
+// box's left edge — and a label box is as wide as its text, so the badge landed
+// far away from the arrow it belonged to.
+function getLabelBadgeAnchor(editor: Editor, arrowId: TLShapeId) {
+  const shape = editor.getShape(arrowId)
+  const transform = editor.getShapePageTransform(arrowId)
+  const props = shape?.props as
+    | { start?: { x: number; y: number }; end?: { x: number; y: number }; scale?: number }
+    | undefined
+
+  if (!transform || !props?.start || !props?.end) {
+    return null
+  }
+
+  const scale = props.scale ?? 1
+  const tail = transform.applyToPoint(props.start)
+  const head = transform.applyToPoint(props.end)
+  const dx = tail.x - head.x
+  const dy = tail.y - head.y
+  const length = Math.hypot(dx, dy) || 1
+
+  return {
+    // Centre point for the badge; the caller offsets by half the measured box
+    // once tldraw has sized the text.
+    x: tail.x + (dx / length) * BADGE_GAP * scale,
+    y: tail.y + (dy / length) * BADGE_GAP * scale,
+    scale,
+  }
 }
 
 function unlockGlobalToolLock(editor: Editor) {

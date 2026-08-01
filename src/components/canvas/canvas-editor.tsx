@@ -21,12 +21,10 @@ import {
   TextToolbarItem,
   Tldraw,
   createShapeId,
-  renderPlaintextFromRichText,
   type Editor,
   type TLAssetId,
   type TLComponents,
   type TLImageAsset,
-  type TLRichText,
   type TLShapeId,
 } from "tldraw"
 import { ChevronLeftIcon, ChevronRightIcon, LoaderCircleIcon, XIcon } from "lucide-react"
@@ -38,10 +36,13 @@ import {
   ToolbarItem,
   createAnnotationUiOverrides,
   getAnnotationShapeIds,
+  getAnnotationText,
   installAnnotationListeners,
+  numberAnnotationsForExport,
 } from "@/components/canvas/annotation-tool"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { showLastReference } from "@/lib/canvas/debug-reference"
 import { editImage, ensureDataUrl, measureDataUrl } from "@/lib/canvas/image-provider"
 import { DEFAULT_LOCALE, t, type Locale } from "@/lib/i18n"
 import type { GeneratedImage } from "@/lib/image-request"
@@ -282,20 +283,26 @@ export function CanvasEditor({
     }
 
     const annotationIds = getAnnotationShapeIds(editor)
-    // Labels also go into the prompt as a fallback for weak OCR, but the pixels
-    // are what localize the edit — see the export below.
-    const changes = [instruction.trim(), ...getAnnotationTexts(editor, annotationIds)].filter(
-      Boolean
-    )
+    const generalInstruction = instruction.trim()
 
-    if (!changes.length) {
+    if (!generalInstruction && !annotationIds.some((id) => getAnnotationText(editor, id))) {
       toast.error(t(locale, "canvasInstructionRequired"))
       return
     }
 
     setIsGenerating(true)
 
+    let numbering: Awaited<ReturnType<typeof numberAnnotationsForExport>> | null = null
+    let exportedUrl: string
+
     try {
+      // Stamp "1.", "2." onto the labels so the numbered list in the prompt has
+      // a visible counterpart in the reference image. Restored in `finally` —
+      // the user never sees the numbers on their own canvas. This lives inside
+      // the try because anything thrown before `setIsGenerating(false)` runs
+      // would leave the button spinning with no way out.
+      numbering = await numberAnnotationsForExport(editor, annotationIds)
+
       // Rasterize the image *together with* its annotations, over the union of
       // their bounds. This is the mechanism that makes a local edit local: the
       // model reads the arrow and its label as pixels and sees exactly which
@@ -303,16 +310,28 @@ export function CanvasEditor({
       // aspect ratio) cuts off any label drawn beside the artwork and leaves
       // the model with a bare arrow, which it just renders the scene around.
       // Matches the upstream Cowart export (lib/selectionExport.js).
-      const exported = await editor.toImageDataUrl([shapeId, ...annotationIds], {
+      const exported = await editor.toImageDataUrl([shapeId, ...annotationIds, ...numbering.badgeIds], {
         format: "png",
         background: true,
         padding: "auto",
         pixelRatio: EXPORT_PIXEL_RATIO,
       })
 
+      exportedUrl = exported.url
+    } catch (error) {
+      setIsGenerating(false)
+      toast.error(error instanceof Error ? error.message : t(locale, "proxyGenerationFailed"))
+      return
+    } finally {
+      numbering?.restore()
+    }
+
+    const changes = numbering.labelled.map((entry: { text: string }) => entry.text)
+
+    try {
       const result = await editImage({
-        prompt: buildRevisionPrompt(changes),
-        imageDataUrl: exported.url,
+        prompt: buildRevisionPrompt(changes, generalInstruction),
+        imageDataUrl: exportedUrl,
         width: current.width,
         height: current.height,
         model: source.model,
@@ -411,6 +430,19 @@ export function CanvasEditor({
           <p className="truncate text-xs text-muted-foreground">{t(locale, "canvasEditorHint")}</p>
         </div>
 
+        {process.env.NODE_ENV !== "production" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="font-mono text-xs"
+            title="Dev only: view the reference image that was uploaded"
+            onClick={showLastReference}
+          >
+            reference
+          </Button>
+        ) : null}
+
         {hasRevisions ? (
           <div className="flex items-center gap-1 rounded-md border px-1 py-0.5">
             <Button
@@ -485,17 +517,6 @@ export function CanvasEditor({
   )
 }
 
-function getAnnotationTexts(editor: Editor, ids: TLShapeId[]) {
-  return ids
-    .map((id) => {
-      const richText = (editor.getShape(id)?.props as { richText?: TLRichText } | undefined)
-        ?.richText
-
-      return richText ? renderPlaintextFromRichText(editor, richText).trim() : ""
-    })
-    .filter(Boolean)
-}
-
 // Wording follows upstream Cowart's buildEditPrompt: apply the instructions,
 // preserve subject/composition/aspect/style, and strip the annotation artifacts
 // so they don't survive into the output.
@@ -511,14 +532,29 @@ function getAnnotationTexts(editor: Editor, ids: TLShapeId[]) {
 // and returned a near-identical image. The reference image is the context an
 // edit needs.
 const REVISION_PROMPT_PREFIX =
-  "Apply these edit instructions to the reference image. The red arrows and their text labels mark exactly where each change goes."
+  "Apply these edit instructions to the reference image. Each red arrow points at the region to change, and the red number next to an arrow matches the numbered instruction below."
 const REVISION_PROMPT_SUFFIX =
-  "Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: red arrows, labels, blue selection outlines, resize handles, and tool UI. Output only the clean revised image."
+  "Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: red arrows, red numbers, labels, blue selection outlines, resize handles, and tool UI. Output only the clean revised image."
 
-function buildRevisionPrompt(changes: string[]) {
-  const list = changes.map((change, index) => `${index + 1}. ${change}`).join("\n")
+// The numbered list matches the numbers stamped onto the arrows in the
+// reference image, so keep the order and the indices identical. The free-text
+// instruction is not numbered: it applies to the whole image, not to one arrow.
+function buildRevisionPrompt(annotationTexts: string[], generalInstruction: string) {
+  const lines = [REVISION_PROMPT_PREFIX]
 
-  return `${REVISION_PROMPT_PREFIX}\n${list}\n${REVISION_PROMPT_SUFFIX}`
+  if (annotationTexts.length) {
+    lines.push(
+      ...annotationTexts.map((text, index) => `${index + 1}. ${text}`)
+    )
+  }
+
+  if (generalInstruction) {
+    lines.push(generalInstruction)
+  }
+
+  lines.push(REVISION_PROMPT_SUFFIX)
+
+  return lines.join("\n")
 }
 
 export { ToolbarItem }
