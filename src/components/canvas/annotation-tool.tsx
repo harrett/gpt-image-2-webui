@@ -23,6 +23,7 @@ import {
   type Editor,
   type TLArrowShapeProps,
   type TLRichText,
+  type TLShape,
   type TLShapeId,
   type TLUiOverrides,
 } from "tldraw"
@@ -58,10 +59,49 @@ export function getAnnotationShapeIds(editor: Editor) {
   return Array.from(editor.getCurrentPageShapeIds()).filter((id) => isAnnotationShapeId(editor, id))
 }
 
-export function getAnnotationText(editor: Editor, id: TLShapeId) {
+/**
+ * Human-readable names of the colours actually used by the markup, so the
+ * prompt can describe it instead of assuming one. The annotation tool defaults
+ * to red, but the draw, text and note tools use whatever the user picked from
+ * the style panel — telling the model to look for "red markup" when the user
+ * drew in black is worse than saying nothing.
+ *
+ * tldraw's colour ids are already English words; only the hyphenated ones
+ * ("light-blue") need touching up.
+ */
+export function getMarkupColorNames(editor: Editor, ids: TLShapeId[]) {
+  const names = new Set<string>()
+
+  for (const id of ids) {
+    const color = (editor.getShape(id)?.props as { color?: string } | undefined)?.color
+
+    if (color) {
+      names.add(color.replace(/-/g, " "))
+    }
+  }
+
+  return Array.from(names)
+}
+
+/**
+ * Plain text of any shape that carries rich text — arrow labels, text shapes,
+ * sticky notes, geo shape labels. Returns "" for shapes without text.
+ */
+export function getShapeText(editor: Editor, id: TLShapeId) {
   const richText = (editor.getShape(id)?.props as { richText?: TLRichText } | undefined)?.richText
 
   return richText ? renderPlaintextFromRichText(editor, richText).trim() : ""
+}
+
+export const getAnnotationText = getShapeText
+
+// updateShape's partial is a union keyed on a literal `type`, so a value typed
+// as the whole union does not narrow. Every shape we pass here already has a
+// richText prop, checked by getShapeText, so the cast is safe.
+type ShapeTextPatch = Parameters<Editor["updateShape"]>[0]
+
+function shapeTextPatch(id: TLShapeId, type: TLShape["type"], text: string) {
+  return { id, type, props: { richText: toRichText(text) } } as ShapeTextPatch
 }
 
 const LABEL_LAYOUT_MAX_FRAMES = 20
@@ -130,17 +170,25 @@ async function waitForLabelLayout(editor: Editor, ids: TLShapeId[]) {
  * label is blanked for the duration of the export, which also keeps mangled
  * glyphs out of the reference image.
  *
- * Only labelled arrows get a badge. A bare arrow carries a location but no
- * instruction of its own, so numbering it would create a list entry with
- * nothing in it.
+ * This applies to *every* text-carrying shape, not just the annotation tool's
+ * arrows: a standalone text shape or sticky note the user typed is sliced the
+ * same way. An arrow keeps its position through the arrow itself, so its label
+ * is blanked and a badge is drawn at its tail; a text shape has no such body,
+ * so its own content is swapped for the number and it stays where it is.
  *
- * Returns the numbered arrows in order, the badge ids to include in the export,
- * and a cleanup to run once the export is captured.
+ * Shapes with no text (a freehand circle, a bare arrow) are left untouched:
+ * they mark a location without claiming an instruction, so a number would
+ * create a list entry with nothing in it.
+ *
+ * Returns the numbered shapes in order, the badge ids to add to the export, and
+ * a cleanup to run once the export is captured.
  */
 export async function numberAnnotationsForExport(editor: Editor, ids: TLShapeId[]) {
   const labelled = ids
-    .map((id) => ({ id, text: getAnnotationText(editor, id) }))
-    .filter((entry) => entry.text)
+    .map((id) => ({ id, type: editor.getShape(id)?.type, text: getShapeText(editor, id) }))
+    .filter((entry): entry is { id: TLShapeId; type: TLShape["type"]; text: string } =>
+      Boolean(entry.text && entry.type)
+    )
 
   if (!labelled.length) {
     return { labelled, badgeIds: [] as TLShapeId[], restore: () => {} }
@@ -148,7 +196,9 @@ export async function numberAnnotationsForExport(editor: Editor, ids: TLShapeId[
 
   // Read the anchors before blanking the labels — the label box collapses once
   // its text is gone.
-  const anchors = labelled.map((entry) => getLabelBadgeAnchor(editor, entry.id))
+  const anchors = labelled.map((entry) =>
+    entry.type === "arrow" ? getLabelBadgeAnchor(editor, entry.id) : null
+  )
   // Kept paired with its anchor: an arrow whose geometry we cannot read gets no
   // badge, and a bare id array would then be misaligned with `anchors`.
   const badges: { id: TLShapeId; anchor: { x: number; y: number } }[] = []
@@ -157,18 +207,16 @@ export async function numberAnnotationsForExport(editor: Editor, ids: TLShapeId[
   // of the export, not an edit the user made.
   editor.run(
     () => {
-      editor.updateShapes(
-        labelled.map((entry) => ({
-          id: entry.id,
-          type: "arrow" as const,
-          props: { richText: toRichText("") },
-        }))
-      )
-
       labelled.forEach((entry, index) => {
+        const isArrow = entry.type === "arrow"
+
+        // An arrow is still visible with an empty label; anything else would
+        // vanish, so it carries the number in place of its text.
+        editor.updateShape(shapeTextPatch(entry.id, entry.type, isArrow ? "" : `${index + 1}`))
+
         const anchor = anchors[index]
 
-        if (!anchor) {
+        if (!isArrow || !anchor) {
           return
         }
 
@@ -230,11 +278,7 @@ export async function numberAnnotationsForExport(editor: Editor, ids: TLShapeId[
           }
 
           editor.updateShapes(
-            labelled.map((entry) => ({
-              id: entry.id,
-              type: "arrow" as const,
-              props: { richText: toRichText(entry.text) },
-            }))
+            labelled.map((entry) => shapeTextPatch(entry.id, entry.type, entry.text))
           )
         },
         { history: "ignore" }

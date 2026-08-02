@@ -35,8 +35,7 @@ import {
   AnnotationTool,
   ToolbarItem,
   createAnnotationUiOverrides,
-  getAnnotationShapeIds,
-  getAnnotationText,
+  getMarkupColorNames,
   installAnnotationListeners,
   numberAnnotationsForExport,
 } from "@/components/canvas/annotation-tool"
@@ -282,10 +281,13 @@ export function CanvasEditor({
       return
     }
 
-    const annotationIds = getAnnotationShapeIds(editor)
+    // Everything the user put on the board counts as markup, not just the
+    // annotation tool's arrows: freehand circles, text notes, sticky notes and
+    // highlights are all ways of saying "change this bit".
+    const markupIds = Array.from(editor.getCurrentPageShapeIds()).filter((id) => id !== shapeId)
     const generalInstruction = instruction.trim()
 
-    if (!generalInstruction && !annotationIds.some((id) => getAnnotationText(editor, id))) {
+    if (!generalInstruction && !markupIds.length) {
       toast.error(t(locale, "canvasInstructionRequired"))
       return
     }
@@ -294,6 +296,8 @@ export function CanvasEditor({
 
     let numbering: Awaited<ReturnType<typeof numberAnnotationsForExport>> | null = null
     let exportedUrl: string
+    // Captured while the badges still exist — `restore()` deletes them.
+    let colorNames: string[] = []
 
     try {
       // Stamp "1.", "2." onto the labels so the numbered list in the prompt has
@@ -301,16 +305,17 @@ export function CanvasEditor({
       // the user never sees the numbers on their own canvas. This lives inside
       // the try because anything thrown before `setIsGenerating(false)` runs
       // would leave the button spinning with no way out.
-      numbering = await numberAnnotationsForExport(editor, annotationIds)
+      numbering = await numberAnnotationsForExport(editor, markupIds)
+      colorNames = getMarkupColorNames(editor, [...markupIds, ...numbering.badgeIds])
 
-      // Rasterize the image *together with* its annotations, over the union of
-      // their bounds. This is the mechanism that makes a local edit local: the
-      // model reads the arrow and its label as pixels and sees exactly which
-      // region they point at. Cropping to the image box instead (to preserve
-      // aspect ratio) cuts off any label drawn beside the artwork and leaves
-      // the model with a bare arrow, which it just renders the scene around.
-      // Matches the upstream Cowart export (lib/selectionExport.js).
-      const exported = await editor.toImageDataUrl([shapeId, ...annotationIds, ...numbering.badgeIds], {
+      // Rasterize the image *together with* everything drawn on top of it, over
+      // the union of their bounds. This is the mechanism that makes a local
+      // edit local: the model reads the markup as pixels and sees exactly which
+      // region it refers to. Exporting only the image and the arrows would drop
+      // the user's own circles and notes — they would draw markup that never
+      // reached the model. Matches the upstream Cowart export, which rasterizes
+      // the whole selection (lib/selectionExport.js).
+      const exported = await editor.toImageDataUrl([shapeId, ...markupIds, ...numbering.badgeIds], {
         format: "png",
         background: true,
         padding: "auto",
@@ -326,11 +331,17 @@ export function CanvasEditor({
       numbering?.restore()
     }
 
-    const changes = numbering.labelled.map((entry: { text: string }) => entry.text)
+    // Every piece of markup that carried text now shows a number in the image
+    // instead, so the list order here has to match the numbers exactly.
+    const numberedChanges = numbering.labelled.map((entry: { text: string }) => entry.text)
 
     try {
       const result = await editImage({
-        prompt: buildRevisionPrompt(changes, generalInstruction),
+        prompt: buildRevisionPrompt({
+          annotationTexts: numberedChanges,
+          otherInstructions: [generalInstruction],
+          colorNames,
+        }),
         imageDataUrl: exportedUrl,
         width: current.width,
         height: current.height,
@@ -341,10 +352,10 @@ export function CanvasEditor({
         locale,
       })
 
-      // Annotations described *this* revision; leaving them on the board would
-      // bake them into the next one twice.
-      if (annotationIds.length) {
-        editor.deleteShapes(annotationIds)
+      // The markup described *this* revision; leaving it on the board would
+      // bake it into the next one twice.
+      if (markupIds.length) {
+        editor.deleteShapes(markupIds)
       }
 
       // Branching from an older version drops the ones after it, the way an
@@ -365,7 +376,9 @@ export function CanvasEditor({
           // The lineage prompt is what the studio shows for this generation, so
           // it reads as "original intent + what changed" rather than the
           // edit-only instruction we sent to the model.
-          prompt: [current.prompt, ...changes].filter(Boolean).join("\n\n"),
+          prompt: [current.prompt, ...numberedChanges, generalInstruction]
+            .filter(Boolean)
+            .join("\n\n"),
         },
       ]
 
@@ -531,28 +544,56 @@ export function CanvasEditor({
 // as "render this scene again" — it rewrote the prompt into a fresh generation
 // and returned a near-identical image. The reference image is the context an
 // edit needs.
-const REVISION_PROMPT_PREFIX =
-  "Apply these edit instructions to the reference image. Each red arrow points at the region to change, and the red number next to an arrow matches the numbered instruction below."
-const REVISION_PROMPT_SUFFIX =
-  "Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: red arrows, red numbers, labels, blue selection outlines, resize handles, and tool UI. Output only the clean revised image."
+const REVISION_PROMPT_NUMBERING =
+  "The number beside an arrow matches the numbered instruction below."
 
-// The numbered list matches the numbers stamped onto the arrows in the
-// reference image, so keep the order and the indices identical. The free-text
-// instruction is not numbered: it applies to the whole image, not to one arrow.
-function buildRevisionPrompt(annotationTexts: string[], generalInstruction: string) {
-  const lines = [REVISION_PROMPT_PREFIX]
+// Colours come from the shapes themselves — the user picks them in the style
+// panel, so naming a fixed colour would send the model looking for markup that
+// is not there.
+function revisionPromptIntro(colorNames: string[]) {
+  const colors = formatList(colorNames)
+  const markup = colors ? `The ${colors} markup drawn on it` : "The markup drawn on it"
 
-  if (annotationTexts.length) {
-    lines.push(
-      ...annotationTexts.map((text, index) => `${index + 1}. ${text}`)
-    )
+  return `Apply these edit instructions to the reference image. ${markup} — arrows, drawings, notes — points at the regions to change.`
+}
+
+function revisionPromptSuffix(colorNames: string[]) {
+  const colors = formatList(colorNames)
+  const artifacts = colors ? `every ${colors} arrow, drawing, number and label` : "all markup"
+
+  return `Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: ${artifacts}, plus any selection outlines, resize handles and tool UI. Output only the clean revised image.`
+}
+
+function formatList(values: string[]) {
+  if (values.length < 2) {
+    return values[0] ?? ""
   }
 
-  if (generalInstruction) {
-    lines.push(generalInstruction)
-  }
+  return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`
+}
+// The numbered list matches the numbers stamped beside the arrows in the
+// reference image, so keep the order and the indices identical. Unnumbered
+// lines are instructions with no badge of their own: the free-text box, and
+// text the user typed straight onto the canvas.
+function buildRevisionPrompt({
+  annotationTexts,
+  otherInstructions,
+  colorNames,
+}: {
+  annotationTexts: string[]
+  otherInstructions: string[]
+  colorNames: string[]
+}) {
+  const intro = revisionPromptIntro(colorNames)
+  // Only mention the numbers when badges were actually drawn, otherwise the
+  // model is told to look for markers that are not in the image.
+  const lines = [
+    annotationTexts.length > 1 ? `${intro} ${REVISION_PROMPT_NUMBERING}` : intro,
+  ]
 
-  lines.push(REVISION_PROMPT_SUFFIX)
+  lines.push(...annotationTexts.map((text, index) => `${index + 1}. ${text}`))
+  lines.push(...otherInstructions.filter(Boolean))
+  lines.push(revisionPromptSuffix(colorNames))
 
   return lines.join("\n")
 }

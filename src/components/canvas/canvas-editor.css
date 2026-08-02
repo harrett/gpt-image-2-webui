@@ -67,3 +67,45 @@
 .imgx-canvas-editor .tlui-button {
   background-image: none;
 }
+
+/* tldraw's bundled faces (tldraw_draw = Shantell Sans, etc.) carry no CJK
+   glyphs, so Chinese/Japanese/Korean falls through to a generic `sans-serif`
+   whose metrics tldraw's own text measurement does not match. The visible
+   symptom is a text box measured far narrower than it renders, which wraps CJK
+   one character per line into a vertical column. Naming the CJK faces
+   explicitly makes measurement and painting agree. */
+/* tldraw's bundled faces carry no CJK glyphs, and it writes the font stack as
+   an *inline* style (`font-family: tldraw_draw, sans-serif`) computed in JS —
+   so neither its `--tl-font-*` variables nor any rule of ours can widen it.
+   Extending the same family names with a CJK-only `unicode-range` does reach
+   it: the browser picks these faces for CJK codepoints under the very name
+   tldraw asked for.
+
+   Without this, tldraw measures CJK with a font that cannot render it, lands on
+   a box far narrower than the text, and the label wraps one character per line
+   into a vertical column. */
+@font-face {
+  font-family: "tldraw_draw";
+  src: local("PingFang SC"), local("Hiragino Sans GB"), local("Microsoft YaHei"),
+    local("Noto Sans CJK SC"), local("Source Han Sans SC");
+  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
+}
+
+@font-face {
+  font-family: "tldraw_sans";
+  src: local("PingFang SC"), local("Hiragino Sans GB"), local("Microsoft YaHei"),
+    local("Noto Sans CJK SC"), local("Source Han Sans SC");
+  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
+}
+
+@font-face {
+  font-family: "tldraw_serif";
+  src: local("Songti SC"), local("SimSun"), local("Noto Serif CJK SC");
+  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
+}
+
+@font-face {
+  font-family: "tldraw_mono";
+  src: local("PingFang SC"), local("Microsoft YaHei"), local("Noto Sans CJK SC");
+  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
+}
