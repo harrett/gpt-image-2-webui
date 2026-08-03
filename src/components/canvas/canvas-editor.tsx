@@ -30,6 +30,12 @@ import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { showLastReference } from "@/lib/canvas/debug-reference"
 import { editImage, ensureDataUrl, measureDataUrl } from "@/lib/canvas/image-provider"
+import {
+  ANNOTATION_COLOR,
+  AnnotationComposer,
+  AnnotationToolbarButton,
+  useAnnotationTool,
+} from "@/components/canvas/annotation-tool"
 import { describeStrokeColors, readMarkupText } from "@/lib/canvas/markup"
 import { DEFAULT_LOCALE, t, type Locale } from "@/lib/i18n"
 import type { GeneratedImage } from "@/lib/image-request"
@@ -44,7 +50,6 @@ const EXPORT_SCALE = 2
 // Enough that a stroke drawn hard against the artwork's edge is not clipped.
 const EXPORT_PADDING = 16
 const IMAGE_ELEMENT_ID = "imgx-source-image"
-const MARKUP_STROKE_COLOR = "#e03131"
 
 export type CanvasEditorSource = {
   background: string
@@ -133,7 +138,7 @@ async function loadInitialScene(src: string) {
       } satisfies BinaryFileData,
     },
     appState: {
-      currentItemStrokeColor: MARKUP_STROKE_COLOR,
+      currentItemStrokeColor: ANNOTATION_COLOR,
       // Pointing at a region is the most common thing to do here; this replaces
       // the dedicated annotation tool the previous build had.
       activeTool: {
@@ -163,6 +168,8 @@ export function CanvasEditor({
   onClose,
 }: CanvasEditorProps) {
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
+  const boardRef = useRef<HTMLDivElement | null>(null)
+  const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null)
   // Mirrors `versions` so board updates can read the list without going through
   // a state updater.
   const versionsRef = useRef<Version[]>([])
@@ -246,17 +253,21 @@ export function CanvasEditor({
     }
   }, [commitVersions, initialData, locale, source.prompt])
 
-  const handleApi = useCallback((api: ExcalidrawImperativeAPI) => {
-    apiRef.current = api
+  const handleApi = useCallback((next: ExcalidrawImperativeAPI) => {
+    apiRef.current = next
+    setApi(next)
 
     if (process.env.NODE_ENV !== "production") {
       // Fastest way to inspect board state from the browser console.
       ;(window as unknown as { __imgxCanvas?: unknown }).__imgxCanvas = {
-        api,
+        api: next,
         getVersions: () => versionsRef.current,
       }
     }
   }, [])
+
+  // 「标注」: drag once, type at the arrow's tail, drag again.
+  const annotation = useAnnotationTool(api)
 
   async function handleGenerate() {
     const api = apiRef.current
@@ -291,8 +302,7 @@ export function CanvasEditor({
         appState: {
           exportBackground: true,
           viewBackgroundColor: "#ffffff",
-          // The board runs in dark mode to match the app shell; the reference
-          // image must not be inverted.
+          // Matches the board's own theme, so the export is what was drawn.
           exportWithDarkMode: false,
         },
         exportPadding: EXPORT_PADDING,
@@ -493,10 +503,29 @@ export function CanvasEditor({
         </Button>
       </div>
 
-      <div className="relative flex-1">
+      <div className="relative flex-1" ref={boardRef}>
+        <AnnotationToolbarButton
+          label={t(locale, "canvasAnnotate")}
+          isActive={annotation.isActive}
+          onToggle={annotation.toggle}
+          containerRef={boardRef}
+        />
+        <AnnotationComposer
+          composer={annotation.composer}
+          onCommit={annotation.commit}
+          placeholder={t(locale, "canvasAnnotatePlaceholder")}
+        />
         <Excalidraw
           excalidrawAPI={handleApi}
-          theme="dark"
+          // Light, despite the dark app shell. Excalidraw's dark theme is a CSS
+          // filter over the canvas — `invert(93%) hue-rotate(180deg)` — not a
+          // second palette, so the colour stored on an element is the *inverse*
+          // of the one shown in the picker: the swatch that looks white stores
+          // #1e1e1e. A PNG export cannot carry a CSS filter, so white markup
+          // came out black, and the prompt, which reads the stored colour, then
+          // told the model to look for black markup. Light theme applies no
+          // filter, so picker, canvas, export and prompt all agree.
+          theme="light"
           initialData={initialData}
           UIOptions={{
             canvasActions: {

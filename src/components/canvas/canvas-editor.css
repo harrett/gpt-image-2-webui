@@ -11,3 +11,162 @@
 .imgx-canvas-editor .excalidraw button {
   background-image: none;
 }
+
+/* The 「标注」 button sits among Excalidraw's own tools, so it is sized and
+   coloured like one: same 36px row height, same hover and active surfaces, all
+   from Excalidraw's variables so it tracks the theme. It keeps its text label
+   rather than going icon-only, since annotate is the tool this editor is
+   really for. */
+.imgx-canvas-editor .imgx-annotate-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding-inline: 10px;
+  border: 0;
+  border-radius: var(--border-radius-md, 8px);
+  background-color: transparent;
+  color: var(--color-on-surface, currentColor);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.imgx-canvas-editor .imgx-annotate-button:hover {
+  background-color: var(--button-hover-bg, rgba(0, 0, 0, 0.06));
+}
+
+.imgx-canvas-editor .imgx-annotate-button[data-active="true"] {
+  background-color: var(--color-primary-light);
+  color: var(--color-primary-darker);
+}
+
+.imgx-canvas-editor .imgx-annotate-button svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+/* Matches the digits Excalidraw prints in the corner of each tool. */
+.imgx-canvas-editor .imgx-annotate-keybinding {
+  position: absolute;
+  right: 3px;
+  bottom: 2px;
+  font-family: var(--ui-font, inherit);
+  font-size: 8px;
+  color: var(--keybinding-color);
+}
+
+/* Excalidraw's toolbar is a single-row grid whose children are all order 0, so
+   they lay out in DOM order and a portalled child can only land at the end.
+   Pushing everything from the line tool onward to order 2 drops 「标注」 (order
+   1) into the slot the arrow tool used to occupy, which is what its "5" badge
+   claims. */
+.imgx-canvas-editor .App-toolbar > .Stack_horizontal > .imgx-annotate-button {
+  order: 1;
+}
+
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-line"]),
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-freedraw"]),
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-text"]),
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-image"]),
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-eraser"]),
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-frame"]),
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-laser"]),
+.imgx-canvas-editor .App-toolbar > .Stack_horizontal > .App-toolbar__divider ~ .App-toolbar__divider,
+.imgx-canvas-editor .App-toolbar .App-toolbar__extra-tools-trigger {
+  order: 2;
+}
+
+/* The inline label input, shown at the arrow's tail while typing. Styled to
+   match what the committed label will look like, so the text does not appear to
+   jump when it is written into the scene. */
+.imgx-canvas-editor .imgx-annotate-composer {
+  position: absolute;
+  z-index: 20;
+  min-width: 8ch;
+  padding: 2px 6px;
+  border: 1px dashed var(--color-primary, #6965db);
+  border-radius: 6px;
+  background-color: color-mix(in srgb, var(--island-bg-color) 88%, transparent);
+  /* `color` comes from the arrow being labelled, set inline. */
+  font-family: var(--tl-annotate-font, "Excalifont", "Virgil", ui-sans-serif, system-ui, sans-serif);
+  line-height: 1.25;
+  resize: none;
+  outline: none;
+  overflow: hidden;
+}
+
+.imgx-canvas-editor .imgx-annotate-composer::placeholder {
+  color: color-mix(in srgb, currentColor 55%, transparent);
+}
+
+/* Hide Excalidraw's own arrow tool. 「标注」 replaces it outright: every arrow
+   in this editor is an annotation, and reaching the raw tool only produced a
+   bare arrow with the label stuck at its midpoint — the thing 「标注」 exists to
+   avoid. The keyboard shortcuts (A / 5) are neutralised in the flow itself,
+   which treats any new arrow as an annotation. */
+.imgx-canvas-editor .App-toolbar label:has(input[data-testid="toolbar-arrow"]) {
+  display: none;
+}
+
+/* Excalidraw's stock layout puts the toolbar across the top and the shape-style
+   panel down the left. This editor is a picture with a caption above it, so the
+   familiar whiteboard arrangement reads better: tools centred along the bottom,
+   style panel down the right, canvas left with nothing over it.
+
+   None of this is configurable — `UIOptions` covers which actions exist, not
+   where they sit — so the three top-row grid items are taken out of flow and
+   repositioned against `.FixedSideContainer`, their absolutely-positioned
+   ancestor. Skipped on Excalidraw's mobile layout, which stacks these entirely
+   differently. */
+.imgx-canvas-editor .excalidraw:not(.excalidraw--mobile) .shapes-section {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.imgx-canvas-editor .excalidraw:not(.excalidraw--mobile) .App-menu_top__left {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  left: auto;
+}
+
+/* The wrapper above collapses to zero width, because the panel inside it is
+   itself absolutely positioned. Anchoring it right therefore only moves the
+   collapsed point; the panel has to be flipped to grow leftwards from there or
+   it hangs off the edge of the window. */
+.imgx-canvas-editor .excalidraw:not(.excalidraw--mobile) .App-menu_top__left .App-menu__left {
+  right: 0;
+  left: auto;
+}
+
+/* Library browses and inserts shapes from excalidraw.com — another whiteboard
+   feature with nothing to do with marking up one image, and its sidebar eats
+   the canvas when opened. */
+.imgx-canvas-editor .layer-ui__wrapper__top-right {
+  display: none;
+}
+
+/* "More tools" opens downwards from the trigger, which put it off the bottom of
+   the window once the toolbar moved down there. Flip it above instead. */
+.imgx-canvas-editor .excalidraw:not(.excalidraw--mobile) .App-toolbar__extra-tools-dropdown {
+  top: auto;
+  bottom: 100%;
+  margin-bottom: 4px;
+}
+
+/* The hamburger opens file/export/theme actions, nearly all of which are
+   already switched off in UIOptions, and the rest belong to a whiteboard app
+   rather than to editing one image. Its wrapper goes too, so the style panel
+   below does not sit under an empty 36px slot. */
+.imgx-canvas-editor .App-menu_top__left > div:has(> .main-menu-trigger) {
+  display: none;
+}
