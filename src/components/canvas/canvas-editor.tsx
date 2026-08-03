@@ -11,15 +11,25 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import {
+  ArrowToolbarItem,
   AssetRecordType,
   DefaultToolbar,
+  DiamondToolbarItem,
   DrawToolbarItem,
+  EllipseToolbarItem,
   EraserToolbarItem,
   HandToolbarItem,
+  HighlightToolbarItem,
+  LaserToolbarItem,
+  LineToolbarItem,
   NoteToolbarItem,
+  OvalToolbarItem,
+  RectangleToolbarItem,
   SelectToolbarItem,
+  StarToolbarItem,
   TextToolbarItem,
   Tldraw,
+  TriangleToolbarItem,
   createShapeId,
   type Editor,
   type TLAssetId,
@@ -131,6 +141,11 @@ export function CanvasEditor({
   const [isReady, setIsReady] = useState(false)
 
   const components: TLComponents = {
+    // Everything past `maxItems` folds into DefaultToolbar's overflow menu, the
+    // way upstream Cowart's toolbar does. The shapes there matter for this
+    // editor: drawing a rectangle or ellipse around a region is a cleaner way
+    // to say "change this part" than a freehand scribble, and it exports as a
+    // crisp outline the model can read.
     Toolbar: (props) => (
       <DefaultToolbar {...props} maxItems={8}>
         <AnnotationToolbarItem label={t(locale, "canvasAnnotate")} />
@@ -141,6 +156,16 @@ export function CanvasEditor({
         <TextToolbarItem />
         <NoteToolbarItem />
         <EraserToolbarItem />
+        <RectangleToolbarItem />
+        <EllipseToolbarItem />
+        <OvalToolbarItem />
+        <TriangleToolbarItem />
+        <DiamondToolbarItem />
+        <StarToolbarItem />
+        <LineToolbarItem />
+        <ArrowToolbarItem />
+        <HighlightToolbarItem />
+        <LaserToolbarItem />
       </DefaultToolbar>
     ),
     // A single-image editor has no use for pages, and the main menu is all
