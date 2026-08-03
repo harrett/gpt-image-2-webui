@@ -3,66 +3,48 @@
 // Full-screen detail editor for a single studio image.
 //
 // The mental model is "one image, opened up": the board holds exactly one image
-// shape, the user draws annotation arrows on it, and generating a revision
-// *replaces that image in place* rather than adding a second one. Each revision
-// is pushed onto a version stack so the user can flip back, and applying hands
-// the chosen version to the studio as the next generation of the same lineage.
+// element, the user marks it up, and generating a revision *replaces that image
+// in place* rather than adding a second one. Each revision is pushed onto a
+// version stack so the user can flip back, and applying hands the chosen
+// version to the studio as the next generation of the same lineage.
+//
+// Built on Excalidraw (MIT). The previous implementation used tldraw, whose SDK
+// licence requires payment for production use; it also measured text at half
+// size in this app, which forced an elaborate workaround where every label was
+// swapped for a numbered badge before export. Excalidraw measures correctly, so
+// markup text is simply rendered into the reference image as-is.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
-import {
-  ArrowToolbarItem,
-  AssetRecordType,
-  DefaultToolbar,
-  DiamondToolbarItem,
-  DrawToolbarItem,
-  EllipseToolbarItem,
-  EraserToolbarItem,
-  HandToolbarItem,
-  HighlightToolbarItem,
-  LaserToolbarItem,
-  LineToolbarItem,
-  NoteToolbarItem,
-  OvalToolbarItem,
-  RectangleToolbarItem,
-  SelectToolbarItem,
-  StarToolbarItem,
-  TextToolbarItem,
-  Tldraw,
-  TriangleToolbarItem,
-  createShapeId,
-  type Editor,
-  type TLAssetId,
-  type TLComponents,
-  type TLImageAsset,
-  type TLShapeId,
-} from "tldraw"
+import { Excalidraw, exportToBlob } from "@excalidraw/excalidraw"
+import type {
+  BinaryFileData,
+  DataURL,
+  ExcalidrawImperativeAPI,
+} from "@excalidraw/excalidraw/types"
+import type { ExcalidrawElement, FileId } from "@excalidraw/excalidraw/element/types"
 import { ChevronLeftIcon, ChevronRightIcon, LoaderCircleIcon, XIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import {
-  AnnotationToolbarItem,
-  AnnotationTool,
-  ToolbarItem,
-  createAnnotationUiOverrides,
-  getMarkupColorNames,
-  installAnnotationListeners,
-  numberAnnotationsForExport,
-} from "@/components/canvas/annotation-tool"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { showLastReference } from "@/lib/canvas/debug-reference"
 import { editImage, ensureDataUrl, measureDataUrl } from "@/lib/canvas/image-provider"
+import { describeStrokeColors, readMarkupText } from "@/lib/canvas/markup"
 import { DEFAULT_LOCALE, t, type Locale } from "@/lib/i18n"
 import type { GeneratedImage } from "@/lib/image-request"
 
-import "tldraw/tldraw.css"
+import "@excalidraw/excalidraw/index.css"
 import "./canvas-editor.css"
 
-// Annotations are thin strokes and small text; exporting at 2x keeps them
-// legible for the image model. The provider shrinks the PNG if it exceeds the
-// upload cap, so this is safe to leave high.
-const EXPORT_PIXEL_RATIO = 2
+// Markup is thin strokes and small text; exporting at 2x keeps it legible for
+// the image model. The provider shrinks the PNG if it exceeds the upload cap,
+// so this is safe to leave high.
+const EXPORT_SCALE = 2
+// Enough that a stroke drawn hard against the artwork's edge is not clipped.
+const EXPORT_PADDING = 16
+const IMAGE_ELEMENT_ID = "imgx-source-image"
+const MARKUP_STROKE_COLOR = "#e03131"
 
 export type CanvasEditorSource = {
   background: string
@@ -73,13 +55,9 @@ export type CanvasEditorSource = {
 }
 
 type Version = {
-  // Every version owns an asset record. Mutating one asset's `src` instead
-  // looks equivalent but does not repaint: tldraw's useImageOrVideoAsset only
-  // re-resolves immediately when the *assetId* changes — a same-asset content
-  // change is deferred behind a ~500ms tick debounce that never fires while the
-  // editor sits idle, so switching versions from the header left the old
-  // picture on screen.
-  assetId: TLAssetId
+  // Every version owns its own Excalidraw file entry; switching versions swaps
+  // the image element's `fileId`.
+  fileId: FileId
   dataUrl: string
   width: number
   height: number
@@ -87,29 +65,86 @@ type Version = {
   prompt: string
 }
 
-function createVersionAsset(
-  editor: Editor,
-  { dataUrl, width, height, mimeType }: Omit<Version, "assetId" | "prompt">
-) {
-  const assetId = AssetRecordType.createId()
-  const asset: TLImageAsset = {
-    id: assetId,
-    typeName: "asset",
+// Excalidraw's image element needs every schema field present, and
+// convertToExcalidrawElements does not accept `locked`. Build it by hand.
+function buildImageElement(fileId: FileId, width: number, height: number) {
+  return {
+    id: IMAGE_ELEMENT_ID,
     type: "image",
-    meta: {},
-    props: {
-      name: "version.png",
-      src: dataUrl,
-      w: width,
-      h: height,
-      mimeType,
-      isAnimated: false,
+    x: 0,
+    y: 0,
+    width,
+    height,
+    angle: 0,
+    strokeColor: "transparent",
+    backgroundColor: "transparent",
+    fillStyle: "solid",
+    strokeWidth: 1,
+    strokeStyle: "solid",
+    roughness: 1,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    seed: 1,
+    version: 1,
+    versionNonce: 1,
+    isDeleted: false,
+    boundElements: null,
+    updated: Date.now(),
+    link: null,
+    // The source image is the canvas, not a movable object: locking it means
+    // drags always draw markup instead of nudging the artwork.
+    locked: true,
+    status: "saved",
+    fileId,
+    scale: [1, 1],
+    crop: null,
+  } as unknown as ExcalidrawElement
+}
+
+/**
+ * Build the board's starting scene.
+ *
+ * The board is seeded through `initialData` rather than imperatively from the
+ * excalidrawAPI callback. That callback fires while Excalidraw's own async
+ * scene initialisation is still in flight, and calling updateScene there races
+ * it: the app stays stuck at `isLoading: true` and never paints a single frame
+ * — no image, not even a plain rectangle. Handing it a promise lets it finish
+ * initialising with our content already in place.
+ */
+async function loadInitialScene(src: string) {
+  const dataUrl = await ensureDataUrl(src)
+  const size = await measureDataUrl(dataUrl)
+  const fileId = "imgx-v0" as FileId
+
+  return {
+    fileId,
+    dataUrl,
+    width: size.width,
+    height: size.height,
+    elements: [buildImageElement(fileId, size.width, size.height)],
+    files: {
+      [fileId]: {
+        id: fileId,
+        mimeType: "image/png",
+        dataURL: dataUrl as DataURL,
+        created: Date.now(),
+      } satisfies BinaryFileData,
     },
+    appState: {
+      currentItemStrokeColor: MARKUP_STROKE_COLOR,
+      // Pointing at a region is the most common thing to do here; this replaces
+      // the dedicated annotation tool the previous build had.
+      activeTool: {
+        type: "arrow" as const,
+        customType: null,
+        locked: false,
+        lastActiveTool: null,
+      },
+    },
+    scrollToContent: true,
   }
-
-  editor.createAssets([asset])
-
-  return assetId
 }
 
 export type CanvasEditorProps = {
@@ -127,12 +162,9 @@ export function CanvasEditor({
   onApply,
   onClose,
 }: CanvasEditorProps) {
-  const editorRef = useRef<Editor | null>(null)
-  const seededEditorRef = useRef<Editor | null>(null)
-  const shapeIdRef = useRef<TLShapeId | null>(null)
+  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   // Mirrors `versions` so board updates can read the list without going through
-  // a state updater — mutating the editor from inside one runs during React's
-  // render phase and crashes tldraw's store subscription.
+  // a state updater.
   const versionsRef = useRef<Version[]>([])
   const [versions, setVersions] = useState<Version[]>([])
   const [versionIndex, setVersionIndex] = useState(0)
@@ -140,231 +172,146 @@ export function CanvasEditor({
   const [isGenerating, setIsGenerating] = useState(false)
   const [isReady, setIsReady] = useState(false)
 
-  const components: TLComponents = {
-    // Everything past `maxItems` folds into DefaultToolbar's overflow menu, the
-    // way upstream Cowart's toolbar does. The shapes there matter for this
-    // editor: drawing a rectangle or ellipse around a region is a cleaner way
-    // to say "change this part" than a freehand scribble, and it exports as a
-    // crisp outline the model can read.
-    Toolbar: (props) => (
-      <DefaultToolbar {...props} maxItems={8}>
-        <AnnotationToolbarItem label={t(locale, "canvasAnnotate")} />
-        <div aria-orientation="vertical" className="imgx-toolbar-divider" role="separator" />
-        <SelectToolbarItem />
-        <HandToolbarItem />
-        <DrawToolbarItem />
-        <TextToolbarItem />
-        <NoteToolbarItem />
-        <EraserToolbarItem />
-        <RectangleToolbarItem />
-        <EllipseToolbarItem />
-        <OvalToolbarItem />
-        <TriangleToolbarItem />
-        <DiamondToolbarItem />
-        <StarToolbarItem />
-        <LineToolbarItem />
-        <ArrowToolbarItem />
-        <HighlightToolbarItem />
-        <LaserToolbarItem />
-      </DefaultToolbar>
-    ),
-    // A single-image editor has no use for pages, and the main menu is all
-    // file/export actions that belong to the studio instead.
-    PageMenu: null,
-    MainMenu: null,
-  }
-
   const commitVersions = useCallback((next: Version[]) => {
     versionsRef.current = next
     setVersions(next)
   }, [])
 
   const showVersion = useCallback((index: number, list: Version[] = versionsRef.current) => {
-    const editor = editorRef.current
-    const shapeId = shapeIdRef.current
+    const api = apiRef.current
     const version = list[index]
 
     setVersionIndex(index)
 
-    if (!editor || !shapeId || !version) {
+    if (!api || !version) {
       return
     }
 
-    const shape = editor.getShape(shapeId)
-    const displayWidth = (shape?.props as { w?: number } | undefined)?.w ?? version.width
+    const elements = api.getSceneElements()
+    const current = elements.find((element) => element.id === IMAGE_ELEMENT_ID)
+    // Keep the on-canvas width stable so swapping versions doesn't make the
+    // image jump; only the height follows the new aspect ratio.
+    const displayWidth = current?.width ?? version.width
 
-    // Point the shape at that version's asset. Keep the on-canvas width stable
-    // so swapping versions doesn't make the image jump; only the height follows
-    // the new aspect ratio.
-    //
-    // ignoreShapeLock is required: the base image is locked so that dragging
-    // draws annotations instead of moving the artwork, and updateShapes()
-    // silently skips locked shapes — without this the swap is a no-op and the
-    // previous version stays on screen.
-    editor.run(
-      () => {
-        editor.updateShape({
-          id: shapeId,
-          type: "image",
-          props: {
-            assetId: version.assetId,
-            h: (displayWidth * version.height) / version.width,
-          },
-        })
-      },
-      { ignoreShapeLock: true }
-    )
+    api.updateScene({
+      elements: elements.map((element) =>
+        element.id === IMAGE_ELEMENT_ID
+          ? ({
+              ...element,
+              fileId: version.fileId,
+              height: (displayWidth * version.height) / version.width,
+              version: (element.version ?? 1) + 1,
+              versionNonce: Date.now(),
+            } as ExcalidrawElement)
+          : element
+      ),
+    })
   }, [])
 
-  const seedBoard = useCallback(
-    async (editor: Editor) => {
-      try {
-        const dataUrl = await ensureDataUrl(image.src)
-        const size = await measureDataUrl(dataUrl)
-        const shapeId = createShapeId()
-        const assetId = createVersionAsset(editor, {
-          dataUrl,
-          width: size.width,
-          height: size.height,
-          mimeType: "image/png",
-        })
+  // Started once, in a lazy state initialiser, so re-renders never reseed the
+  // board and discard the user's markup.
+  const [initialData] = useState(() => loadInitialScene(image.src))
 
-        shapeIdRef.current = shapeId
+  useEffect(() => {
+    let cancelled = false
 
-        editor.createShape({
-          id: shapeId,
-          type: "image",
-          x: 0,
-          y: 0,
-          props: { assetId, w: size.width, h: size.height },
-        })
-        editor.zoomToFit({ animation: { duration: 0 } })
-        // The source image is the canvas, not a movable object: locking it
-        // means drags always draw annotations instead of nudging the artwork.
-        editor.toggleLock([shapeId])
-        editor.setCurrentTool("imgx-annotation")
+    initialData.then(
+      (scene) => {
+        if (cancelled || !scene) {
+          return
+        }
 
         commitVersions([
           {
-            assetId,
-            dataUrl,
-            width: size.width,
-            height: size.height,
+            fileId: scene.fileId,
+            dataUrl: scene.dataUrl,
+            width: scene.width,
+            height: scene.height,
             mimeType: "image/png",
             prompt: source.prompt,
           },
         ])
         setVersionIndex(0)
         setIsReady(true)
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : t(locale, "proxyGenerationFailed"))
-      }
-    },
-    [commitVersions, image.src, locale, source.prompt]
-  )
-
-  // onMount must stay synchronous — tldraw treats its return value as a cleanup
-  // function — so the async seeding runs as a detached task.
-  const handleMount = useCallback(
-    (editor: Editor) => {
-      editorRef.current = editor
-
-      // StrictMode (and Fast Refresh) re-run effects against the *same* editor,
-      // so onMount fires more than once and we would stack a second copy of the
-      // image on top of the first. The guard has to be synchronous: seedBoard
-      // awaits before it creates anything, so two concurrent calls would both
-      // sail past a check made inside it.
-      if (seededEditorRef.current === editor) {
-        return
-      }
-
-      seededEditorRef.current = editor
-
-      if (process.env.NODE_ENV !== "production") {
-        // Fastest way to inspect board state from the browser console.
-        ;(window as unknown as { __imgxCanvas?: unknown }).__imgxCanvas = {
-          editor,
-          getVersions: () => versionsRef.current,
-          getShapeId: () => shapeIdRef.current,
+      },
+      (error: unknown) => {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : t(locale, "proxyGenerationFailed"))
         }
       }
+    )
 
-      void seedBoard(editor)
+    return () => {
+      cancelled = true
+    }
+  }, [commitVersions, initialData, locale, source.prompt])
 
-      // onMount's return value is tldraw's cleanup hook.
-      return installAnnotationListeners(editor)
-    },
-    [seedBoard]
-  )
+  const handleApi = useCallback((api: ExcalidrawImperativeAPI) => {
+    apiRef.current = api
+
+    if (process.env.NODE_ENV !== "production") {
+      // Fastest way to inspect board state from the browser console.
+      ;(window as unknown as { __imgxCanvas?: unknown }).__imgxCanvas = {
+        api,
+        getVersions: () => versionsRef.current,
+      }
+    }
+  }, [])
 
   async function handleGenerate() {
-    const editor = editorRef.current
-    const shapeId = shapeIdRef.current
+    const api = apiRef.current
     const current = versions[versionIndex]
 
-    if (!editor || !shapeId || !current) {
+    if (!api || !current) {
       return
     }
 
-    // Everything the user put on the board counts as markup, not just the
-    // annotation tool's arrows: freehand circles, text notes, sticky notes and
-    // highlights are all ways of saying "change this bit".
-    const markupIds = Array.from(editor.getCurrentPageShapeIds()).filter((id) => id !== shapeId)
+    const elements = api.getSceneElements()
+    // Everything the user put on the board counts as markup, not just arrows:
+    // freehand circles, text notes and shapes are all ways of saying "change
+    // this bit".
+    const markup = elements.filter((element) => element.id !== IMAGE_ELEMENT_ID)
     const generalInstruction = instruction.trim()
 
-    if (!generalInstruction && !markupIds.length) {
+    if (!generalInstruction && !markup.length) {
       toast.error(t(locale, "canvasInstructionRequired"))
       return
     }
 
     setIsGenerating(true)
 
-    let numbering: Awaited<ReturnType<typeof numberAnnotationsForExport>> | null = null
-    let exportedUrl: string
-    // Captured while the badges still exist — `restore()` deletes them.
-    let colorNames: string[] = []
-
     try {
-      // Stamp "1.", "2." onto the labels so the numbered list in the prompt has
-      // a visible counterpart in the reference image. Restored in `finally` —
-      // the user never sees the numbers on their own canvas. This lives inside
-      // the try because anything thrown before `setIsGenerating(false)` runs
-      // would leave the button spinning with no way out.
-      numbering = await numberAnnotationsForExport(editor, markupIds)
-      colorNames = getMarkupColorNames(editor, [...markupIds, ...numbering.badgeIds])
-
       // Rasterize the image *together with* everything drawn on top of it, over
-      // the union of their bounds. This is the mechanism that makes a local
-      // edit local: the model reads the markup as pixels and sees exactly which
-      // region it refers to. Exporting only the image and the arrows would drop
-      // the user's own circles and notes — they would draw markup that never
-      // reached the model. Matches the upstream Cowart export, which rasterizes
-      // the whole selection (lib/selectionExport.js).
-      const exported = await editor.toImageDataUrl([shapeId, ...markupIds, ...numbering.badgeIds], {
-        format: "png",
-        background: true,
-        padding: "auto",
-        pixelRatio: EXPORT_PIXEL_RATIO,
+      // the union of their bounds. This is what makes a local edit local: the
+      // model reads the markup as pixels and sees exactly which region it
+      // refers to. Text is rendered as text — no badge substitution needed.
+      const blob = await exportToBlob({
+        elements,
+        files: api.getFiles(),
+        appState: {
+          exportBackground: true,
+          viewBackgroundColor: "#ffffff",
+          // The board runs in dark mode to match the app shell; the reference
+          // image must not be inverted.
+          exportWithDarkMode: false,
+        },
+        exportPadding: EXPORT_PADDING,
+        mimeType: "image/png",
+        getDimensions: (width: number, height: number) => ({
+          width: width * EXPORT_SCALE,
+          height: height * EXPORT_SCALE,
+          scale: EXPORT_SCALE,
+        }),
       })
 
-      exportedUrl = exported.url
-    } catch (error) {
-      setIsGenerating(false)
-      toast.error(error instanceof Error ? error.message : t(locale, "proxyGenerationFailed"))
-      return
-    } finally {
-      numbering?.restore()
-    }
+      const exportedUrl = await blobToDataUrl(blob)
+      const markupTexts = readMarkupText(markup)
+      const colorNames = describeStrokeColors(markup)
 
-    // Every piece of markup that carried text now shows a number in the image
-    // instead, so the list order here has to match the numbers exactly.
-    const numberedChanges = numbering.labelled.map((entry: { text: string }) => entry.text)
-
-    try {
       const result = await editImage({
         prompt: buildRevisionPrompt({
-          annotationTexts: numberedChanges,
-          otherInstructions: [generalInstruction],
+          markupTexts,
+          generalInstruction,
           colorNames,
         }),
         imageDataUrl: exportedUrl,
@@ -377,23 +324,27 @@ export function CanvasEditor({
         locale,
       })
 
+      const fileId = `imgx-v${versionsRef.current.length}-${Date.now()}` as FileId
+
+      api.addFiles([
+        {
+          id: fileId,
+          mimeType: "image/png",
+          dataURL: result.dataUrl as DataURL,
+          created: Date.now(),
+        } satisfies BinaryFileData,
+      ])
+
       // The markup described *this* revision; leaving it on the board would
       // bake it into the next one twice.
-      if (markupIds.length) {
-        editor.deleteShapes(markupIds)
-      }
+      api.updateScene({ elements: elements.filter((el) => el.id === IMAGE_ELEMENT_ID) })
 
       // Branching from an older version drops the ones after it, the way an
       // undo-then-edit does — the visible version is always the newest.
       const nextVersions = [
         ...versionsRef.current.slice(0, versionIndex + 1),
         {
-          assetId: createVersionAsset(editor, {
-            dataUrl: result.dataUrl,
-            width: result.width,
-            height: result.height,
-            mimeType: result.mimeType,
-          }),
+          fileId,
           dataUrl: result.dataUrl,
           width: result.width,
           height: result.height,
@@ -401,7 +352,7 @@ export function CanvasEditor({
           // The lineage prompt is what the studio shows for this generation, so
           // it reads as "original intent + what changed" rather than the
           // edit-only instruction we sent to the model.
-          prompt: [current.prompt, ...numberedChanges, generalInstruction]
+          prompt: [current.prompt, ...markupTexts, generalInstruction]
             .filter(Boolean)
             .join("\n\n"),
         },
@@ -439,14 +390,15 @@ export function CanvasEditor({
         return
       }
 
-      const editor = editorRef.current
+      const api = apiRef.current
 
-      // Escape belongs to tldraw first: it finishes a label, cancels a drag, or
-      // clears the selection. Closing the whole editor is only the *idle*
-      // meaning of the key, otherwise one Escape would discard the annotation
-      // the user was still typing. The listener runs in the capture phase so
-      // these checks see the state before tldraw resets it.
-      if (editor?.getEditingShapeId() || editor?.getSelectedShapeIds().length) {
+      // Escape belongs to the canvas first: it finishes a label, cancels a
+      // drag, or clears the selection. Closing the whole editor is only the
+      // *idle* meaning of the key, otherwise one Escape would discard the
+      // annotation the user was still typing.
+      const appState = api?.getAppState()
+
+      if (appState?.editingTextElement || Object.keys(appState?.selectedElementIds ?? {}).length) {
         return
       }
 
@@ -542,12 +494,25 @@ export function CanvasEditor({
       </div>
 
       <div className="relative flex-1">
-        <Tldraw
-          licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
-          tools={[AnnotationTool]}
-          overrides={createAnnotationUiOverrides(t(locale, "canvasAnnotate"))}
-          components={components}
-          onMount={handleMount}
+        <Excalidraw
+          excalidrawAPI={handleApi}
+          theme="dark"
+          initialData={initialData}
+          UIOptions={{
+            canvasActions: {
+              // Loading or saving .excalidraw files, and changing the canvas
+              // background, belong to a whiteboard app — not to "edit this one
+              // image and hand it back".
+              loadScene: false,
+              saveToActiveFile: false,
+              export: false,
+              saveAsImage: false,
+              changeViewBackgroundColor: false,
+              clearCanvas: false,
+            },
+            // Adding *other* images does not fit "edit this one image".
+            tools: { image: false },
+          }}
         />
       </div>
     </div>,
@@ -555,38 +520,50 @@ export function CanvasEditor({
   )
 }
 
-// Wording follows upstream Cowart's buildEditPrompt: apply the instructions,
-// preserve subject/composition/aspect/style, and strip the annotation artifacts
-// so they don't survive into the output.
+async function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+// Three jobs: apply the instructions, preserve subject/composition/aspect/style,
+// and strip the annotation artifacts so they don't survive into the output.
 //
 // Deliberately English and deliberately *not* in src/lib/i18n.ts. This is model
 // scaffolding, not UI copy: image models follow English instructions most
 // reliably, and a per-locale copy would be nine strings drifting apart. The
-// user's own annotation text is passed through verbatim in whatever language
-// they wrote it.
+// user's own markup text is passed through verbatim in whatever language they
+// wrote it.
 //
 // The original prompt is also omitted. Passing it made the model treat the call
 // as "render this scene again" — it rewrote the prompt into a fresh generation
 // and returned a near-identical image. The reference image is the context an
 // edit needs.
-const REVISION_PROMPT_NUMBERING =
-  "The number beside an arrow matches the numbered instruction below."
-
-// Colours come from the shapes themselves — the user picks them in the style
-// panel, so naming a fixed colour would send the model looking for markup that
-// is not there.
-function revisionPromptIntro(colorNames: string[]) {
+function buildRevisionPrompt({
+  markupTexts,
+  generalInstruction,
+  colorNames,
+}: {
+  markupTexts: string[]
+  generalInstruction: string
+  colorNames: string[]
+}) {
   const colors = formatList(colorNames)
   const markup = colors ? `The ${colors} markup drawn on it` : "The markup drawn on it"
 
-  return `Apply these edit instructions to the reference image. ${markup} — arrows, drawings, notes — points at the regions to change.`
-}
+  const lines = [
+    `Apply these edit instructions to the reference image. ${markup} — arrows, drawings, notes — points at the regions to change, and any text written beside a mark is the instruction for that mark.`,
+    ...markupTexts,
+    generalInstruction,
+    `Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: ${
+      colors ? `every ${colors} arrow, drawing and label` : "all markup"
+    }, plus any selection outlines, resize handles and tool UI. Output only the clean revised image.`,
+  ]
 
-function revisionPromptSuffix(colorNames: string[]) {
-  const colors = formatList(colorNames)
-  const artifacts = colors ? `every ${colors} arrow, drawing, number and label` : "all markup"
-
-  return `Preserve the original subject, composition, aspect ratio, and style. Remove all annotation artifacts from the output: ${artifacts}, plus any selection outlines, resize handles and tool UI. Output only the clean revised image.`
+  return lines.filter(Boolean).join("\n")
 }
 
 function formatList(values: string[]) {
@@ -596,31 +573,4 @@ function formatList(values: string[]) {
 
   return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`
 }
-// The numbered list matches the numbers stamped beside the arrows in the
-// reference image, so keep the order and the indices identical. Unnumbered
-// lines are instructions with no badge of their own: the free-text box, and
-// text the user typed straight onto the canvas.
-function buildRevisionPrompt({
-  annotationTexts,
-  otherInstructions,
-  colorNames,
-}: {
-  annotationTexts: string[]
-  otherInstructions: string[]
-  colorNames: string[]
-}) {
-  const intro = revisionPromptIntro(colorNames)
-  // Only mention the numbers when badges were actually drawn, otherwise the
-  // model is told to look for markers that are not in the image.
-  const lines = [
-    annotationTexts.length > 1 ? `${intro} ${REVISION_PROMPT_NUMBERING}` : intro,
-  ]
 
-  lines.push(...annotationTexts.map((text, index) => `${index + 1}. ${text}`))
-  lines.push(...otherInstructions.filter(Boolean))
-  lines.push(revisionPromptSuffix(colorNames))
-
-  return lines.join("\n")
-}
-
-export { ToolbarItem }

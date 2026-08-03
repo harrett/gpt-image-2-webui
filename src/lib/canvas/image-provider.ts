@@ -1,22 +1,15 @@
-// Image provider for the infinite canvas.
+// Image provider for the canvas editor.
 //
-// This is the canvas counterpart of the upstream Cowart project's
-// `models/imageAdapters.js`, with one deliberate difference: there is no
-// per-provider endpoint, no API key per provider, and no CORS proxy. Every call
-// goes to the same same-origin `/api/images` route the image studio uses, which
-// forwards to the server-only INTERNAL_IMAGE_API_BASE_URL. Consequences worth
-// knowing:
+// There is no per-provider endpoint, no API key per provider, and no CORS
+// proxy: every call goes to the same same-origin `/api/images` route the image
+// studio uses, which forwards to the server-only INTERNAL_IMAGE_API_BASE_URL.
+// Consequences worth knowing:
 //
 //   - The browser never learns the upstream address, so the canvas inherits the
 //     studio's lockdown for free.
-//   - Same-origin means CORS cannot fail, so none of the upstream project's
-//     proxyUrl / "Failed to fetch means CORS" machinery is needed.
+//   - Same-origin means CORS cannot fail.
 //   - IMAGE_API_MOCK works here too: the canvas gets placeholder images with no
 //     API key, same as the studio.
-//
-// The exported signatures intentionally mirror the upstream adapter contract
-// (generateImage / editImage returning { dataUrl, width, height, mimeType }) so
-// canvas code ported later needs no rewrite.
 
 import { inspectReference } from "@/lib/canvas/debug-reference"
 import { getStoredApiKey } from "@/lib/connection-preferences"
@@ -98,8 +91,8 @@ async function blobToDataUrl(blob: Blob) {
 
 /**
  * Guarantee a data URL. Studio results can still carry a hosted `url` when the
- * upstream returned one and inlining was not requested — and a remote image on
- * a tldraw canvas taints the export canvas, which breaks `toImageDataUrl`.
+ * upstream returned one and inlining was not requested, and a remote image on
+ * the canvas taints the export canvas, which breaks the rasterize-to-PNG step.
  */
 export async function ensureDataUrl(src: string) {
   if (src.startsWith("data:")) {
@@ -142,7 +135,7 @@ async function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: n
  * Turn a canvas export into a reference upload that is small enough to send
  * quickly.
  *
- * tldraw exports PNG at `pixelRatio: 2`. PNG is lossless, so photographic
+ * The canvas exports PNG at 2x. PNG is lossless, so photographic
  * content barely compresses: a full-size export runs 8-10MB, which sneaks under
  * the server's 10MB reject and then takes minutes to upload on a home
  * connection's upstream. Re-encoding to WebP and capping the long edge cuts

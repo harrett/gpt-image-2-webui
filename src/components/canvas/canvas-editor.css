@@ -1,111 +1,13 @@
-/* Styles for the tldraw surface inside the detail editor. Scoped to
-   .imgx-canvas-editor so tldraw's own CSS (imported globally by the editor
-   chunk) cannot leak into the studio layout. */
+/* Styles for the Excalidraw surface inside the detail editor.
+   Scoped to .imgx-canvas-editor so nothing leaks into the studio layout. */
 
-.imgx-canvas-editor .tlui-button__tool.imgx-annotation-toolbar-button {
-  display: inline-flex;
-  width: auto;
-  min-width: 76px;
-  padding: 0 12px;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-}
-
-.imgx-canvas-editor .tlui-button__tool.imgx-annotation-toolbar-button::after {
-  inset: 4px;
-}
-
-/* The overflow menu renders tools as plain icons; the labelled variant would
-   break its grid. */
-.imgx-canvas-editor .tlui-main-toolbar__overflow-content .imgx-annotation-toolbar-button {
-  display: none;
-}
-
-.imgx-canvas-editor .imgx-annotation-toolbar-label {
-  position: relative;
-  z-index: 1;
-  flex: 0 0 auto;
-  color: currentColor;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  user-select: none;
-}
-
-.imgx-canvas-editor .imgx-annotation-tool-icon {
-  display: grid;
-  flex: 0 0 auto;
-  position: relative;
-  z-index: 1;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  color: currentColor;
-}
-
-.imgx-canvas-editor .imgx-annotation-tool-icon svg {
-  display: block;
-  width: 100%;
+/* Excalidraw sizes itself to its container, which needs an explicit height. */
+.imgx-canvas-editor .excalidraw {
   height: 100%;
 }
 
-.imgx-canvas-editor .imgx-toolbar-divider {
-  align-self: center;
-  flex: 0 0 auto;
-  width: 1px;
-  height: 22px;
-  margin: 0 4px;
-  pointer-events: none;
-  background: #d1d5db;
-  border-radius: 1px;
-}
-
-/* Tailwind's preflight sets `svg { display: block }` and resets button styling;
-   tldraw's UI assumes the browser defaults. Restore what its layout relies on. */
-.imgx-canvas-editor .tlui-button {
+/* Tailwind's preflight sets `svg { display: block }` and zeroes button styling;
+   Excalidraw's UI assumes the browser defaults for its icon buttons. */
+.imgx-canvas-editor .excalidraw button {
   background-image: none;
-}
-
-/* tldraw's bundled faces (tldraw_draw = Shantell Sans, etc.) carry no CJK
-   glyphs, so Chinese/Japanese/Korean falls through to a generic `sans-serif`
-   whose metrics tldraw's own text measurement does not match. The visible
-   symptom is a text box measured far narrower than it renders, which wraps CJK
-   one character per line into a vertical column. Naming the CJK faces
-   explicitly makes measurement and painting agree. */
-/* tldraw's bundled faces carry no CJK glyphs, and it writes the font stack as
-   an *inline* style (`font-family: tldraw_draw, sans-serif`) computed in JS —
-   so neither its `--tl-font-*` variables nor any rule of ours can widen it.
-   Extending the same family names with a CJK-only `unicode-range` does reach
-   it: the browser picks these faces for CJK codepoints under the very name
-   tldraw asked for.
-
-   Without this, tldraw measures CJK with a font that cannot render it, lands on
-   a box far narrower than the text, and the label wraps one character per line
-   into a vertical column. */
-@font-face {
-  font-family: "tldraw_draw";
-  src: local("PingFang SC"), local("Hiragino Sans GB"), local("Microsoft YaHei"),
-    local("Noto Sans CJK SC"), local("Source Han Sans SC");
-  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
-}
-
-@font-face {
-  font-family: "tldraw_sans";
-  src: local("PingFang SC"), local("Hiragino Sans GB"), local("Microsoft YaHei"),
-    local("Noto Sans CJK SC"), local("Source Han Sans SC");
-  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
-}
-
-@font-face {
-  font-family: "tldraw_serif";
-  src: local("Songti SC"), local("SimSun"), local("Noto Serif CJK SC");
-  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
-}
-
-@font-face {
-  font-family: "tldraw_mono";
-  src: local("PingFang SC"), local("Microsoft YaHei"), local("Noto Sans CJK SC");
-  unicode-range: U+2E80-9FFF, U+AC00-D7AF, U+F900-FAFF, U+FF00-FFEF, U+3000-303F;
 }

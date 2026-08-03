@@ -101,9 +101,9 @@ import { cn } from "@/lib/utils"
 const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
-// tldraw is ~1MB and touches window at module scope: keep it out of the studio
-// bundle and off the server render, loading it only when the user opens the
-// detail editor.
+// The canvas library is ~1MB and touches window at module scope: keep it out
+// of the studio bundle and off the server render, loading it only when the user
+// opens the detail editor.
 const CanvasEditor = dynamic(
   () => import("@/components/canvas/canvas-editor").then((mod) => mod.CanvasEditor),
   { ssr: false }

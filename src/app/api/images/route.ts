@@ -110,10 +110,10 @@ function getEditSize(formData: FormData) {
 }
 
 // Some OpenAI-compatible providers answer with a hosted `url` instead of
-// `b64_json`. The canvas stores its whole tldraw snapshot (image assets
-// inlined) in IndexedDB, so a remote URL there would rot: the link expires and
-// the browser may not be allowed to re-fetch it cross-origin. Callers that need
-// self-contained bytes opt in with `inlineRemoteImages`.
+// `b64_json`. The canvas keeps image bytes inline so a revision stays valid
+// after the upstream link expires, and so the browser is never asked to
+// re-fetch it cross-origin. Callers that need self-contained bytes opt in with
+// `inlineRemoteImages`.
 //
 // Security note: the URL fetched here comes from the *upstream response*, never
 // from the browser's request body — this does not widen the SSRF surface the
