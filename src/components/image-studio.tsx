@@ -28,6 +28,7 @@ import {
   RefreshCwIcon,
   ScissorsIcon,
   SparklesIcon,
+  TriangleAlertIcon,
   WandSparklesIcon,
   XIcon,
   ZoomInIcon,
@@ -115,6 +116,8 @@ const CUSTOM_SIZE_OPTION_VALUE = "custom"
 // Canvases hold base64 image payloads, so this cap is a memory budget as much as
 // a UI one: ~4 images per canvas at up to ~550KB each for 4K renders.
 const MAX_HISTORY_CANVASES = 12
+const RISK_NOTICE_ACKNOWLEDGED_UNTIL_KEY = "imgx.risk-notice-acknowledged-until"
+const RISK_NOTICE_SUPPRESSION_MS = 7 * 24 * 60 * 60 * 1000
 const DEFAULT_SIZE = "1024x1024"
 const DEFAULT_CUSTOM_SIZE = "1280x720"
 const PRESET_SIZE_VALUES = [
@@ -813,6 +816,80 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
   },
 }
 
+type RiskNoticeCopy = {
+  acknowledge: string
+  description: string
+  disagree: string
+  eyebrow: string
+  title: string
+}
+
+const riskNoticeCopies: Record<Locale, RiskNoticeCopy> = {
+  en: {
+    acknowledge: "I understand (don't remind me for 7 days)",
+    description: "Do not use this service to generate sexual, graphic violence, terrorism, or any other illegal or prohibited content. Violations may cause associated service accounts to be permanently banned. The system periodically checks relevant keywords; detected violations may result in an immediate ban and blacklist entry. Any remaining balance or subscription will be void and is non-refundable.",
+    disagree: "I disagree",
+    eyebrow: "Important safety notice",
+    title: "Use the image service responsibly",
+  },
+  zh: {
+    acknowledge: "我知道了（7天内不再提示）",
+    description: "禁止使用本系统生成色情、血腥暴力、恐怖主义或其他违法违规内容。违规行为可能连带导致相关服务账号被永久封禁。系统会定期检查相关关键词；一经发现，将直接封禁并加入黑名单，账号内余额及订阅同时作废，恕不退款。",
+    disagree: "我不同意",
+    eyebrow: "重要安全提示",
+    title: "请合规使用图片生成服务",
+  },
+  "zh-TW": {
+    acknowledge: "我知道了（7 天內不再提示）",
+    description: "禁止使用本系統生成色情、血腥暴力、恐怖主義或其他違法違規內容。違規行為可能連帶導致相關服務帳號被永久封禁。系統會定期檢查相關關鍵詞；一經發現，將直接封禁並加入黑名單，帳號內餘額及訂閱同時作廢，恕不退款。",
+    disagree: "我不同意",
+    eyebrow: "重要安全提示",
+    title: "請合規使用圖片生成服務",
+  },
+  ja: {
+    acknowledge: "確認しました（7日間表示しない）",
+    description: "性的、残虐な暴力、テロリズム、その他の違法・禁止コンテンツの生成に本サービスを使用しないでください。違反すると、関連サービスのアカウントが永久停止される場合があります。システムは関連キーワードを定期的に確認し、違反を検出した場合は直ちにアカウントを停止してブラックリストに登録します。残高およびサブスクリプションは失効し、返金されません。",
+    disagree: "同意しません",
+    eyebrow: "重要な安全上の注意",
+    title: "画像生成サービスを適切にご利用ください",
+  },
+  ko: {
+    acknowledge: "확인했습니다(7일 동안 표시 안 함)",
+    description: "성적 콘텐츠, 잔혹한 폭력, 테러리즘 또는 기타 불법·금지 콘텐츠를 생성하는 데 이 서비스를 사용하지 마세요. 위반 시 관련 서비스 계정이 영구 정지될 수 있습니다. 시스템은 관련 키워드를 정기적으로 확인하며, 위반이 감지되면 즉시 계정을 정지하고 블랙리스트에 등록합니다. 남은 잔액과 구독은 무효 처리되며 환불되지 않습니다.",
+    disagree: "동의하지 않습니다",
+    eyebrow: "중요 안전 안내",
+    title: "이미지 생성 서비스를 책임감 있게 사용하세요",
+  },
+  es: {
+    acknowledge: "Entendido (no avisar durante 7 días)",
+    description: "No utilices este servicio para generar contenido sexual, violencia gráfica, terrorismo ni ningún otro contenido ilegal o prohibido. Las infracciones pueden provocar el bloqueo permanente de las cuentas de servicio asociadas. El sistema revisa periódicamente palabras clave relacionadas; una infracción detectada puede causar el bloqueo inmediato y la inclusión en una lista negra. El saldo y las suscripciones restantes quedarán anulados y no serán reembolsables.",
+    disagree: "No estoy de acuerdo",
+    eyebrow: "Aviso de seguridad importante",
+    title: "Usa responsablemente el servicio de imágenes",
+  },
+  fr: {
+    acknowledge: "J'ai compris (ne plus afficher pendant 7 jours)",
+    description: "N'utilisez pas ce service pour générer du contenu sexuel, de la violence graphique, du terrorisme ou tout autre contenu illégal ou interdit. Toute infraction peut entraîner le bannissement définitif des comptes de service associés. Le système vérifie régulièrement les mots-clés concernés ; une infraction détectée peut entraîner un bannissement immédiat et une inscription sur liste noire. Le solde et les abonnements restants seront annulés et non remboursables.",
+    disagree: "Je refuse",
+    eyebrow: "Avis de sécurité important",
+    title: "Utilisez le service d'images de manière responsable",
+  },
+  de: {
+    acknowledge: "Verstanden (7 Tage nicht mehr anzeigen)",
+    description: "Verwenden Sie diesen Dienst nicht zur Erstellung sexueller Inhalte, drastischer Gewalt, terroristischer oder anderer illegaler bzw. verbotener Inhalte. Verstöße können zur dauerhaften Sperrung verbundener Dienstkonten führen. Das System prüft regelmäßig relevante Schlüsselwörter; erkannte Verstöße können eine sofortige Sperrung und Aufnahme in eine Sperrliste zur Folge haben. Restguthaben und Abonnements verfallen und werden nicht erstattet.",
+    disagree: "Ich stimme nicht zu",
+    eyebrow: "Wichtiger Sicherheitshinweis",
+    title: "Nutzen Sie den Bilddienst verantwortungsvoll",
+  },
+  pt: {
+    acknowledge: "Entendi (não avisar por 7 dias)",
+    description: "Não use este serviço para gerar conteúdo sexual, violência gráfica, terrorismo ou qualquer outro conteúdo ilegal ou proibido. Violações podem causar o banimento permanente das contas de serviço associadas. O sistema verifica periodicamente palavras-chave relevantes; infrações detectadas podem resultar em banimento imediato e inclusão em lista de bloqueio. Qualquer saldo ou assinatura restante será invalidado e não haverá reembolso.",
+    disagree: "Não concordo",
+    eyebrow: "Aviso de segurança importante",
+    title: "Use o serviço de imagens com responsabilidade",
+  },
+}
+
 const remixRecipeItems: {
   count: number
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
@@ -1146,9 +1223,11 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
   const [editorImageIndex, setEditorImageIndex] = useState<number | null>(null)
+  const [isRiskNoticeOpen, setIsRiskNoticeOpen] = useState(false)
   const locale = localeOverride ?? browserLocale
   const text = studioMessages[locale]
   const workflow = getWorkflowCopy(locale)
+  const riskNotice = riskNoticeCopies[locale]
   const isCjk = isCjkLocale(locale)
   const selectedLocale = LOCALE_OPTIONS.find((item) => item.value === locale) || LOCALE_OPTIONS[0]
   const promptPresets = useMemo(() => studioPromptPresets[locale], [locale])
@@ -1208,6 +1287,22 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       setApiKey(preferences.apiKey)
 
       setHasLoadedPreferences(true)
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [])
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      try {
+        const acknowledgedUntil = Number(localStorage.getItem(RISK_NOTICE_ACKNOWLEDGED_UNTIL_KEY))
+
+        setIsRiskNoticeOpen(!Number.isFinite(acknowledgedUntil) || acknowledgedUntil <= Date.now())
+      } catch {
+        // Storage can be unavailable in hardened/private browser contexts. The
+        // notice still works for the current visit, but cannot be suppressed.
+        setIsRiskNoticeOpen(true)
+      }
     }, 0)
 
     return () => window.clearTimeout(timeoutId)
@@ -1303,6 +1398,19 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
   const closeViewer = useCallback(() => {
     setViewerIndex(null)
+  }, [])
+
+  const acknowledgeRiskNotice = useCallback(() => {
+    try {
+      localStorage.setItem(
+        RISK_NOTICE_ACKNOWLEDGED_UNTIL_KEY,
+        String(Date.now() + RISK_NOTICE_SUPPRESSION_MS)
+      )
+    } catch {
+      // Closing remains available even when this browser refuses storage.
+    }
+
+    setIsRiskNoticeOpen(false)
   }, [])
 
   const stepViewer = useCallback((step: number) => {
@@ -2455,6 +2563,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
       {result && viewerIndex !== null && viewerIndex < result.images.length && (
         <ImageViewer
+          editLabel={text.canvasEditorTitle}
           images={result.images}
           index={viewerIndex}
           outputFormat={result.outputFormat}
@@ -2462,6 +2571,10 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           size={result.size}
           workflow={workflow}
           onClose={closeViewer}
+          onEdit={(index) => {
+            closeViewer()
+            setEditorImageIndex(index)
+          }}
           onSelect={openViewer}
           onStep={stepViewer}
         />
@@ -2480,6 +2593,14 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           }}
           onApply={applyEditedImage}
           onClose={() => setEditorImageIndex(null)}
+        />
+      )}
+
+      {isRiskNoticeOpen && (
+        <RiskNoticeDialog
+          copy={riskNotice}
+          onAcknowledge={acknowledgeRiskNotice}
+          onDisagree={() => setIsRiskNoticeOpen(false)}
         />
       )}
     </div>
@@ -2679,6 +2800,93 @@ function subscribeToNothing() {
   return () => {}
 }
 
+function RiskNoticeDialog({
+  copy,
+  onAcknowledge,
+  onDisagree,
+}: {
+  copy: RiskNoticeCopy
+  onAcknowledge: () => void
+  onDisagree: () => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+
+    if (!dialog) {
+      return
+    }
+
+    const preventDismiss = (event: Event) => event.preventDefault()
+
+    dialog.addEventListener("cancel", preventDismiss)
+    dialog.showModal()
+
+    return () => {
+      dialog.removeEventListener("cancel", preventDismiss)
+
+      if (dialog.open) {
+        dialog.close()
+      }
+    }
+  }, [])
+
+  return createPortal(
+    <dialog
+      ref={dialogRef}
+      aria-describedby="risk-notice-description"
+      aria-labelledby="risk-notice-title"
+      className="m-0 h-dvh max-h-none w-screen max-w-none bg-transparent p-0 text-foreground backdrop:bg-black/75 backdrop:backdrop-blur-md"
+    >
+      <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+        <section className="w-full max-w-xl overflow-hidden rounded-xl border border-destructive/35 bg-card shadow-[0_32px_120px_-28px_rgba(0,0,0,0.95)]">
+          <div className="border-b border-destructive/20 bg-destructive/8 px-5 py-5 sm:px-6">
+            <div className="mb-3 flex items-center gap-2 text-xs font-semibold tracking-wide text-destructive uppercase">
+              <TriangleAlertIcon className="size-4" />
+              {copy.eyebrow}
+            </div>
+            <h2 id="risk-notice-title" className="text-xl font-semibold tracking-tight sm:text-2xl">
+              {copy.title}
+            </h2>
+          </div>
+
+          <div className="px-5 py-5 sm:px-6">
+            <p
+              id="risk-notice-description"
+              className="text-sm leading-7 text-muted-foreground sm:text-[15px]"
+            >
+              {copy.description}
+            </p>
+          </div>
+
+          <div className="grid gap-2 border-t bg-muted/25 px-5 py-4 sm:grid-cols-[auto_1fr] sm:px-6">
+            <Button
+              type="button"
+              size="lg"
+              variant="outline"
+              className="h-auto min-h-10 rounded-md px-4 whitespace-normal"
+              onClick={onDisagree}
+            >
+              {copy.disagree}
+            </Button>
+            <Button
+              type="button"
+              size="lg"
+              autoFocus
+              className="h-auto min-h-10 rounded-md px-4 whitespace-normal"
+              onClick={onAcknowledge}
+            >
+              {copy.acknowledge}
+            </Button>
+          </div>
+        </section>
+      </div>
+    </dialog>,
+    document.body
+  )
+}
+
 const DRAG_THRESHOLD = 4
 
 type ViewerPan = {
@@ -2690,6 +2898,7 @@ type ViewerPan = {
 }
 
 function ImageViewer({
+  editLabel,
   images,
   index,
   outputFormat,
@@ -2697,9 +2906,11 @@ function ImageViewer({
   size,
   workflow,
   onClose,
+  onEdit,
   onSelect,
   onStep,
 }: {
+  editLabel: string
   images: GeneratedImage[]
   index: number
   outputFormat: string
@@ -2707,6 +2918,7 @@ function ImageViewer({
   size: string
   workflow: WorkflowCopy
   onClose: () => void
+  onEdit: (index: number) => void
   onSelect: (index: number) => void
   onStep: (step: number) => void
 }) {
@@ -2874,6 +3086,16 @@ function ImageViewer({
             size="lg"
             variant="secondary"
             className="rounded-md"
+            onClick={() => onEdit(index)}
+          >
+            <PencilRulerIcon data-icon="inline-start" />
+            <span className="hidden sm:inline">{editLabel}</span>
+          </Button>
+          <Button
+            type="button"
+            size="lg"
+            variant="secondary"
+            className="rounded-md"
             onClick={toggleZoom}
           >
             {isZoomed ? (
@@ -2971,6 +3193,17 @@ function ImageViewer({
       </div>
 
       <div className="flex flex-col gap-3 border-t bg-background/60 px-4 py-3">
+        <div className="flex justify-center">
+          <Button
+            type="button"
+            size="lg"
+            className="min-w-48 rounded-md shadow-lg"
+            onClick={() => onEdit(index)}
+          >
+            <PencilRulerIcon data-icon="inline-start" />
+            {editLabel}
+          </Button>
+        </div>
         {hasMultiple && (
           <div className="flex items-center justify-center gap-2 overflow-x-auto">
             {images.map((item, itemIndex) => (
