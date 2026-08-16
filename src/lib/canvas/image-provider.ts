@@ -16,6 +16,11 @@ import { getStoredApiKey } from "@/lib/connection-preferences"
 import { DEFAULT_LOCALE, resolveLocale, t, type Locale } from "@/lib/i18n"
 import type { GeneratedImage } from "@/lib/image-request"
 import { sizeForCanvasBox } from "@/lib/image-size"
+import {
+  readPayloadBytes,
+  readTextWithProgress,
+  type TransferTracker,
+} from "@/lib/transfer-progress"
 
 export const DEFAULT_CANVAS_MODEL = "gpt-image-2"
 
@@ -57,6 +62,12 @@ type CanvasImageRequest = {
   background?: string
   locale?: Locale
   signal?: AbortSignal
+  /**
+   * Reports the wait/download split back to the caller. A revision comes back
+   * as inline base64 — and with `inlineRemoteImages` on, always as bytes rather
+   * than a link — so the body download is a large share of the perceived wait.
+   */
+  onTransfer?: TransferTracker
 }
 
 function currentLocale(locale?: Locale) {
@@ -198,6 +209,7 @@ async function requestImage({
   outputFormat = "png",
   background = "auto",
   locale,
+  onTransfer,
   signal,
 }: CanvasImageRequest): Promise<CanvasImageResult> {
   const activeLocale = currentLocale(locale)
@@ -229,15 +241,37 @@ async function requestImage({
     formData.append("images", reference, reference.name)
   }
 
+  // `fetch` resolves once the response headers land, which is exactly when the
+  // upstream finished the revision. Everything after that is the body download,
+  // so the two are tracked as separate phases instead of one opaque wait.
   const response = await fetch("/api/images", {
     method: "POST",
     body: formData,
     signal,
   })
-  const payload = (await response.json()) as {
+
+  onTransfer?.onHeaders(readPayloadBytes(response.headers))
+
+  const body = await readTextWithProgress(response, (receivedBytes) =>
+    onTransfer?.onProgress(receivedBytes)
+  )
+
+  onTransfer?.onFinish()
+
+  let payload: {
     error?: string
     images?: GeneratedImage[]
     mock?: boolean
+  }
+
+  try {
+    payload = JSON.parse(body)
+  } catch {
+    throw new Error(
+      response.ok
+        ? t(activeLocale, "noImageInPayload")
+        : t(activeLocale, "requestFailedStatus", { status: response.status })
+    )
   }
 
   if (!response.ok) {

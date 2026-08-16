@@ -20,6 +20,15 @@ export type TransferSlot = {
   totalBytes: number | null
 }
 
+// Handed to whatever performs the request. `onFailure` is the caller's to fire
+// from its catch block — the request helpers only report what they observed.
+export type TransferTracker = {
+  onFailure: () => void
+  onFinish: () => void
+  onHeaders: (totalBytes: number | null) => void
+  onProgress: (receivedBytes: number) => void
+}
+
 export type TransferSummary = {
   bytesPerSecond: number | null
   downloadElapsedMs: number

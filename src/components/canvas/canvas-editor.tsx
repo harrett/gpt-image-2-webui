@@ -28,6 +28,8 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { TransferTimeline } from "@/components/transfer-timeline"
+import { useTransferProgress } from "@/hooks/use-transfer-progress"
 import { showLastReference } from "@/lib/canvas/debug-reference"
 import { editImage, ensureDataUrl, measureDataUrl } from "@/lib/canvas/image-provider"
 import {
@@ -178,6 +180,7 @@ export function CanvasEditor({
   const [instruction, setInstruction] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
   const [isReady, setIsReady] = useState(false)
+  const transfer = useTransferProgress()
 
   const commitVersions = useCallback((next: Version[]) => {
     versionsRef.current = next
@@ -290,6 +293,9 @@ export function CanvasEditor({
     }
 
     setIsGenerating(true)
+    transfer.begin(1)
+
+    const tracker = transfer.createTracker()
 
     try {
       // Rasterize the image *together with* everything drawn on top of it, over
@@ -332,6 +338,7 @@ export function CanvasEditor({
         background: source.background,
         quality: source.quality,
         locale,
+        onTransfer: tracker,
       })
 
       const fileId = `imgx-v${versionsRef.current.length}-${Date.now()}` as FileId
@@ -373,9 +380,11 @@ export function CanvasEditor({
       showVersion(nextVersions.length - 1, nextVersions)
       toast.success(t(locale, "generatedSuccess", { count: 1, suffix: "" }))
     } catch (error) {
+      tracker.onFailure()
       toast.error(error instanceof Error ? error.message : t(locale, "proxyGenerationFailed"))
     } finally {
       setIsGenerating(false)
+      transfer.reset()
     }
   }
 
@@ -502,6 +511,12 @@ export function CanvasEditor({
           )}
         </Button>
       </div>
+
+      {isGenerating && transfer.summary.hasStarted && (
+        <div className="border-b px-4 py-2">
+          <TransferTimeline locale={locale} summary={transfer.summary} />
+        </div>
+      )}
 
       <div className="relative flex-1" ref={boardRef}>
         <AnnotationToolbarButton

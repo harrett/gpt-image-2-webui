@@ -2,7 +2,7 @@
 
 import Image from "next/image"
 import dynamic from "next/dynamic"
-import type { CSSProperties, DragEvent, ReactNode, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react"
+import type { CSSProperties, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react"
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { createPortal } from "react-dom"
 import {
@@ -82,17 +82,14 @@ import {
 import { type GeneratedImage } from "@/lib/image-request"
 import { getSizeDimensions, normalizeCustomSize } from "@/lib/image-size"
 import {
-  createTransferSlot,
   formatBytes,
-  formatDuration,
-  formatTransferRate,
   readPayloadBytes,
   readTextWithProgress,
-  summarizeTransfers,
-  updateTransferSlot,
-  type TransferSlot,
   type TransferSummary,
+  type TransferTracker,
 } from "@/lib/transfer-progress"
+import { TransferTimeline } from "@/components/transfer-timeline"
+import { useTransferProgress } from "@/hooks/use-transfer-progress"
 import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE_KEY,
@@ -958,11 +955,6 @@ type ActiveSource = {
   upload: UploadPreview
 }
 
-type TransferTracker = {
-  onFinish: () => void
-  onHeaders: (totalBytes: number | null) => void
-  onProgress: (receivedBytes: number) => void
-}
 
 function selectValue(value: string | null, fallback: string) {
   return value || fallback
@@ -1231,9 +1223,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [imageCount, setImageCount] = useState(1)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
-  const [transferSlots, setTransferSlots] = useState<TransferSlot[]>([])
-  const [expectedTransferSlots, setExpectedTransferSlots] = useState(1)
-  const [transferClock, setTransferClock] = useState(0)
+  const transfer = useTransferProgress()
   const [canvases, setCanvases] = useState<StudioResponse[]>([])
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
@@ -1282,25 +1272,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const maxReferenceUploads = getReferenceUploadLimit(activeSource)
   const nextGeneration = activeSource ? activeSource.round + 1 : 1
 
-  // The elapsed timers and the pre-first-byte creep are functions of wall-clock
-  // time, not of state, so an in-flight run needs its own heartbeat to repaint.
-  // The heartbeat carries the timestamp rather than a counter so the summary
-  // stays a pure function of state.
-  useEffect(() => {
-    if (!isGenerating) {
-      return
-    }
-
-    const intervalId = window.setInterval(() => setTransferClock(Date.now()), 250)
-
-    return () => window.clearInterval(intervalId)
-  }, [isGenerating])
-
-  const transfer = useMemo(
-    () => summarizeTransfers(transferSlots, expectedTransferSlots, transferClock),
-    [expectedTransferSlots, transferClock, transferSlots]
-  )
-  const progressValue = isGenerating ? Math.max(progress, transfer.percent) : progress
+  const progressValue = isGenerating ? Math.max(progress, transfer.summary.percent) : progress
 
   useEffect(() => {
     document.documentElement.lang = getDocumentLang(locale)
@@ -1775,9 +1747,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
     setIsGenerating(true)
     setProgress(0)
-    setTransferSlots([])
-    setExpectedTransferSlots(total)
-    setTransferClock(Date.now())
+    transfer.begin(total)
     // Detach from any canvas so the skeleton shows; the new canvas only enters
     // history once it actually has an image, so failed runs leave no empty entry.
     setActiveCanvasId(null)
@@ -1824,34 +1794,10 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       }
 
       const runRequest = async () => {
-        const slotId = crypto.randomUUID()
-
-        setTransferSlots((current) => [...current, createTransferSlot(slotId)])
+        const tracker = transfer.createTracker()
 
         try {
-          const topUp = await callProxy(1, {
-            onFinish: () =>
-              setTransferSlots((current) =>
-                updateTransferSlot(current, slotId, (slot) => ({
-                  ...slot,
-                  finishedAt: Date.now(),
-                  phase: "done",
-                }))
-              ),
-            onHeaders: (totalBytes) =>
-              setTransferSlots((current) =>
-                updateTransferSlot(current, slotId, (slot) => ({
-                  ...slot,
-                  firstByteAt: Date.now(),
-                  phase: "downloading",
-                  totalBytes,
-                }))
-              ),
-            onProgress: (receivedBytes) =>
-              setTransferSlots((current) =>
-                updateTransferSlot(current, slotId, (slot) => ({ ...slot, receivedBytes })),
-              ),
-          })
+          const topUp = await callProxy(1, tracker)
 
           servedByMock = servedByMock || topUp.mock
 
@@ -1860,10 +1806,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
             publishResult()
           }
         } catch (error) {
-          // Drop the failed slot rather than parking it at 0%: the retry that
-          // replaces it registers its own slot, and a dead one would otherwise
-          // hold the bar down for the rest of the run.
-          setTransferSlots((current) => current.filter((slot) => slot.id !== slotId))
+          tracker.onFailure()
 
           if (!firstError) {
             firstError = error
@@ -1909,13 +1852,13 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
       progressResetTimeoutRef.current = window.setTimeout(() => {
         setProgress(0)
-        setTransferSlots([])
+        transfer.reset()
         progressResetTimeoutRef.current = null
       }, 900)
     } catch (error) {
       toast.error(getGenerationErrorMessage(error, text.generationFailed))
       setProgress(0)
-      setTransferSlots([])
+      transfer.reset()
     } finally {
       setIsGenerating(false)
     }
@@ -2374,8 +2317,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                 isGenerating || progressValue > 0 ? "opacity-100" : "opacity-0"
               )}
             />
-            {isGenerating && transfer.hasStarted && (
-              <TransferTimeline summary={transfer} text={text} />
+            {isGenerating && transfer.summary.hasStarted && (
+              <TransferTimeline locale={locale} summary={transfer.summary} />
             )}
           </div>
         </form>
@@ -2617,8 +2560,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
             ) : isGenerating ? (
               <GenerationSkeleton
                 count={imageCount}
-                summary={transfer}
-                text={text}
+                locale={locale}
+                summary={transfer.summary}
                 workflow={workflow}
               />
             ) : (
@@ -2758,120 +2701,15 @@ function EmptyCanvas({
   )
 }
 
-// Splits one run into the two waits the user actually feels: the upstream
-// generating (no bytes yet) and the multi-MB body coming down the wire. Without
-// this, a 4-minute run reads as "the model is slow" when three of those minutes
-// were the download.
-function TransferTimeline({
-  summary,
-  text,
-}: {
-  summary: TransferSummary
-  text: StudioMessages
-}) {
-  const isWaiting = summary.waitingCount > 0
-  const isDownloading = summary.downloadingCount > 0
-  const hasDownloadStarted = isDownloading || summary.receivedBytes > 0
-  const downloadDetail = hasDownloadStarted
-    ? [
-        summary.totalBytes
-          ? `${formatBytes(summary.receivedBytes)} / ${summary.isTotalEstimated ? "≈" : ""}${formatBytes(summary.totalBytes)}`
-          : formatBytes(summary.receivedBytes),
-        summary.bytesPerSecond
-          ? formatTransferRate(summary.bytesPerSecond)
-          : text.transferSpeedMeasuring,
-        summary.etaMs
-          ? text.transferEtaLabel.replace("{value}", formatDuration(summary.etaMs))
-          : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : text.transferDownloadPending
-
-  return (
-    <div className="flex flex-col gap-2.5 rounded-md border bg-muted/30 px-3 py-2.5">
-      <div className="flex items-center justify-between gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-        <span>{text.transferTitle}</span>
-        <span className="font-mono tracking-normal">{summary.percent}%</span>
-      </div>
-
-      <TransferPhaseRow
-        detail={formatDuration(summary.waitElapsedMs)}
-        label={text.transferWaitingLabel}
-        state={isWaiting ? "active" : "done"}
-      />
-
-      <TransferPhaseRow
-        detail={hasDownloadStarted ? formatDuration(summary.downloadElapsedMs) : ""}
-        label={text.transferDownloadLabel}
-        state={isDownloading ? "active" : hasDownloadStarted ? "done" : "pending"}
-      >
-        {hasDownloadStarted && (
-          <>
-            <Progress value={summary.downloadPercent} className="h-1 rounded-sm" />
-            <span className="font-mono text-[10px] leading-tight text-muted-foreground">
-              {downloadDetail}
-            </span>
-          </>
-        )}
-      </TransferPhaseRow>
-
-      <p className="text-[10px] leading-snug text-muted-foreground">{text.transferHint}</p>
-    </div>
-  )
-}
-
-function TransferPhaseRow({
-  children,
-  detail,
-  label,
-  state,
-}: {
-  children?: ReactNode
-  detail: string
-  label: string
-  state: "active" | "done" | "pending"
-}) {
-  return (
-    <div className="flex items-start gap-2">
-      <span aria-hidden className="mt-0.5 grid size-3.5 shrink-0 place-items-center">
-        {state === "done" ? (
-          <CheckCircle2Icon className="size-3.5 text-primary" />
-        ) : state === "active" ? (
-          <LoaderCircleIcon className="size-3.5 animate-spin text-primary" />
-        ) : (
-          <span className="size-1.5 rounded-full bg-muted-foreground/40" />
-        )}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex items-baseline justify-between gap-2">
-          <span
-            className={cn(
-              "truncate text-[11px]",
-              state === "pending" ? "text-muted-foreground" : "text-foreground"
-            )}
-          >
-            {label}
-          </span>
-          {detail && (
-            <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{detail}</span>
-          )}
-        </div>
-        {children}
-      </div>
-    </div>
-  )
-}
-
 function GenerationSkeleton({
   count,
+  locale,
   summary,
-  text,
   workflow,
 }: {
   count: number
+  locale: Locale
   summary: TransferSummary
-  text: StudioMessages
   workflow: WorkflowCopy
 }) {
   const skeletonItems = Array.from({ length: Math.min(Math.max(count, 1), 4) }, (_, index) => index)
@@ -2904,7 +2742,7 @@ function GenerationSkeleton({
           <CardDescription>{workflow.panelDescription}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
-          {summary.hasStarted && <TransferTimeline summary={summary} text={text} />}
+          {summary.hasStarted && <TransferTimeline locale={locale} summary={summary} />}
           <Skeleton className="h-24 rounded-2xl" />
           <Skeleton className="h-9 rounded-md" />
           <Skeleton className="h-9 rounded-md" />
