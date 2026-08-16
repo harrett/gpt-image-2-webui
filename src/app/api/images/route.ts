@@ -11,6 +11,7 @@ import {
   type GeneratedImage,
 } from "@/lib/image-request"
 import { normalizeCustomSize } from "@/lib/image-size"
+import { PAYLOAD_BYTES_HEADER } from "@/lib/transfer-progress"
 import {
   createMockImagePayload,
   isMockImageApiEnabled,
@@ -296,7 +297,7 @@ export async function POST(request: Request) {
       )
     }
 
-    return NextResponse.json({
+    const responseBody = JSON.stringify({
       background: getPayloadField(payload, "background"),
       created: getPayloadField(payload, "created"),
       images: generatedImages,
@@ -306,6 +307,19 @@ export async function POST(request: Request) {
       quality: getPayloadField(payload, "quality") || requestQuality,
       size: getPayloadField(payload, "size") || requestSize,
       usage: getPayloadField(payload, "usage"),
+    })
+
+    // Images ride back as inline base64, so this body is routinely multi-MB and
+    // its download can outlast the generation itself. The browser draws a
+    // transfer progress bar from this header. Content-Length cannot serve that
+    // role — it reports the compressed size on the wire while the client's
+    // stream reader counts decoded bytes — so publish the uncompressed length.
+    return new NextResponse(responseBody, {
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "application/json; charset=utf-8",
+        [PAYLOAD_BYTES_HEADER]: String(Buffer.byteLength(responseBody)),
+      },
     })
   } catch (error) {
     if (error instanceof OpenAI.APIError) {

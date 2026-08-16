@@ -118,6 +118,14 @@ const en = {
   canvasPreviousVersion: "Previous version",
   canvasNextVersion: "Next version",
   canvasApplied: "Applied the edited image as a new generation.",
+  transferTitle: "Delivery timeline",
+  transferWaitingLabel: "Waiting for server",
+  transferDownloadLabel: "Downloading images",
+  transferDownloadPending: "queued",
+  transferSpeedMeasuring: "measuring…",
+  transferEtaLabel: "~{value} left",
+  transferHint:
+    "Images are delivered as full-resolution data. On a slow connection this download takes longer than the generation itself.",
 } as const
 
 export type StudioMessages = { [Key in keyof typeof en]: string }
@@ -222,6 +230,13 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "上一个版本",
     canvasNextVersion: "下一个版本",
     canvasApplied: "已把编辑后的图片作为新一代结果。",
+    transferTitle: "耗时分布",
+    transferWaitingLabel: "等待服务器生成",
+    transferDownloadLabel: "下载图片数据",
+    transferDownloadPending: "排队中",
+    transferSpeedMeasuring: "测速中…",
+    transferEtaLabel: "约剩 {value}",
+    transferHint: "图片以原图数据直接传输。网络较慢时，下载耗时会超过生成本身。",
   },
   "zh-TW": {
     metadataTitle: "ImgX Studio｜AI 圖片工作台",
@@ -320,6 +335,13 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "上一個版本",
     canvasNextVersion: "下一個版本",
     canvasApplied: "已把編輯後的圖片作為新一代結果。",
+    transferTitle: "耗時分布",
+    transferWaitingLabel: "等待伺服器生成",
+    transferDownloadLabel: "下載圖片資料",
+    transferDownloadPending: "排隊中",
+    transferSpeedMeasuring: "測速中…",
+    transferEtaLabel: "約剩 {value}",
+    transferHint: "圖片以原圖資料直接傳輸。網路較慢時，下載耗時會超過生成本身。",
   },
   ja: {
     metadataTitle: "ImgX Studio | AI画像ワークスペース",
@@ -418,6 +440,13 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "前のバージョン",
     canvasNextVersion: "次のバージョン",
     canvasApplied: "編集後の画像を新しい世代として保存しました。",
+    transferTitle: "所要時間の内訳",
+    transferWaitingLabel: "サーバーの生成待ち",
+    transferDownloadLabel: "画像のダウンロード",
+    transferDownloadPending: "待機中",
+    transferSpeedMeasuring: "計測中…",
+    transferEtaLabel: "残り約 {value}",
+    transferHint: "画像は原寸データのまま転送されます。回線が遅い場合、ダウンロードは生成そのものより時間がかかります。",
   },
   ko: {
     ...en,
@@ -515,6 +544,13 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "이전 버전",
     canvasNextVersion: "다음 버전",
     canvasApplied: "편집한 이미지를 새 세대 결과로 저장했습니다.",
+    transferTitle: "소요 시간 분석",
+    transferWaitingLabel: "서버 생성 대기",
+    transferDownloadLabel: "이미지 다운로드",
+    transferDownloadPending: "대기 중",
+    transferSpeedMeasuring: "측정 중…",
+    transferEtaLabel: "약 {value} 남음",
+    transferHint: "이미지는 원본 해상도 데이터 그대로 전송됩니다. 회선이 느리면 다운로드가 생성보다 오래 걸립니다.",
   },
   es: {
     ...en,
@@ -613,6 +649,14 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Versión anterior",
     canvasNextVersion: "Versión siguiente",
     canvasApplied: "La imagen editada se guardó como nueva generación.",
+    transferTitle: "Reparto del tiempo",
+    transferWaitingLabel: "Esperando al servidor",
+    transferDownloadLabel: "Descargando imágenes",
+    transferDownloadPending: "en cola",
+    transferSpeedMeasuring: "midiendo…",
+    transferEtaLabel: "~{value} restante",
+    transferHint:
+      "Las imágenes se envían como datos a resolución completa. Con una conexión lenta, esta descarga tarda más que la propia generación.",
   },
   fr: {
     ...en,
@@ -709,6 +753,14 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Version précédente",
     canvasNextVersion: "Version suivante",
     canvasApplied: "L'image modifiée a été enregistrée comme nouvelle génération.",
+    transferTitle: "Répartition du temps",
+    transferWaitingLabel: "Attente du serveur",
+    transferDownloadLabel: "Téléchargement des images",
+    transferDownloadPending: "en file d'attente",
+    transferSpeedMeasuring: "mesure…",
+    transferEtaLabel: "~{value} restant",
+    transferHint:
+      "Les images sont transmises en pleine résolution. Sur une connexion lente, ce téléchargement dure plus longtemps que la génération elle-même.",
   },
   de: {
     ...en,
@@ -805,6 +857,14 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Vorherige Version",
     canvasNextVersion: "Nächste Version",
     canvasApplied: "Das bearbeitete Bild wurde als neue Generation gespeichert.",
+    transferTitle: "Zeitverteilung",
+    transferWaitingLabel: "Warten auf den Server",
+    transferDownloadLabel: "Bilder werden geladen",
+    transferDownloadPending: "in Warteschlange",
+    transferSpeedMeasuring: "wird gemessen…",
+    transferEtaLabel: "noch ca. {value}",
+    transferHint:
+      "Bilder werden als Daten in voller Auflösung übertragen. Bei langsamer Verbindung dauert dieser Download länger als die Generierung selbst.",
   },
   pt: {
     ...en,
@@ -901,6 +961,14 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasPreviousVersion: "Versão anterior",
     canvasNextVersion: "Próxima versão",
     canvasApplied: "A imagem editada foi salva como nova geração.",
+    transferTitle: "Distribuição do tempo",
+    transferWaitingLabel: "Aguardando o servidor",
+    transferDownloadLabel: "Baixando imagens",
+    transferDownloadPending: "na fila",
+    transferSpeedMeasuring: "medindo…",
+    transferEtaLabel: "~{value} restante",
+    transferHint:
+      "As imagens são entregues como dados em resolução total. Em conexões lentas, esse download demora mais que a própria geração.",
   },
 }
 
