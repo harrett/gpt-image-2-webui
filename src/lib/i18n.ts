@@ -110,6 +110,9 @@ const en = {
   canvasAnnotate: "Annotate",
   canvasAnnotatePlaceholder: "Describe the change…",
   canvasEditorHint: "Draw annotation arrows on the image, describe the change, then generate a revision.",
+  canvasEditorLoading: "Loading the detail editor…",
+  canvasEditorLoadingHint:
+    "The drawing canvas loads as a separate bundle, so the first open takes a few seconds.",
   canvasGenerateRevision: "Generate revision",
   canvasInstructionPlaceholder: "Describe the change, or just annotate the image…",
   canvasInstructionRequired: "Write a change instruction, or draw an annotation arrow on the image.",
@@ -222,6 +225,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "标注",
     canvasAnnotatePlaceholder: "写出修改要求…",
     canvasEditorHint: "在图上画标注箭头写出修改要求，然后生成修改。",
+    canvasEditorLoading: "正在加载细节编辑器…",
+    canvasEditorLoadingHint:
+      "画布是独立的模块，首次打开需要先加载，大约几秒钟，请稍候。",
     canvasGenerateRevision: "生成修改",
     canvasInstructionPlaceholder: "描述你想要的修改，或者直接在图上标注…",
     canvasInstructionRequired: "请写一句修改说明，或在图上画一个标注箭头。",
@@ -327,6 +333,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "標註",
     canvasAnnotatePlaceholder: "寫出修改需求…",
     canvasEditorHint: "在圖上畫標註箭頭寫出修改需求，然後生成修改。",
+    canvasEditorLoading: "正在載入細節編輯器…",
+    canvasEditorLoadingHint:
+      "畫布是獨立的模組，首次開啟需要先載入，大約幾秒鐘，請稍候。",
     canvasGenerateRevision: "生成修改",
     canvasInstructionPlaceholder: "描述你想要的修改，或者直接在圖上標註…",
     canvasInstructionRequired: "請寫一句修改說明，或在圖上畫一個標註箭頭。",
@@ -432,6 +441,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "注釈",
     canvasAnnotatePlaceholder: "修正内容を記入…",
     canvasEditorHint: "画像に注釈の矢印を描いて修正内容を書き、修正版を生成します。",
+    canvasEditorLoading: "詳細編集エディタを読み込んでいます…",
+    canvasEditorLoadingHint:
+      "キャンバスは別モジュールのため、初回の起動には数秒かかります。",
     canvasGenerateRevision: "修正版を生成",
     canvasInstructionPlaceholder: "修正内容を記入、または画像に直接注釈を…",
     canvasInstructionRequired: "修正内容を入力するか、画像に注釈の矢印を描いてください。",
@@ -536,6 +548,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "주석",
     canvasAnnotatePlaceholder: "수정 사항을 적으세요…",
     canvasEditorHint: "이미지에 주석 화살표를 그려 수정 사항을 적고 수정본을 생성하세요.",
+    canvasEditorLoading: "세부 편집기를 불러오는 중…",
+    canvasEditorLoadingHint:
+      "캔버스는 별도 모듈이라 처음 열 때 몇 초 정도 걸립니다.",
     canvasGenerateRevision: "수정본 생성",
     canvasInstructionPlaceholder: "원하는 수정을 설명하거나 이미지에 바로 주석을 남기세요…",
     canvasInstructionRequired: "수정 설명을 쓰거나 이미지에 주석 화살표를 그려 주세요.",
@@ -641,6 +656,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "Anotar",
     canvasAnnotatePlaceholder: "Describe el cambio…",
     canvasEditorHint: "Dibuja flechas de anotación sobre la imagen, describe el cambio y genera una revisión.",
+    canvasEditorLoading: "Cargando el editor de detalle…",
+    canvasEditorLoadingHint:
+      "El lienzo se carga como un paquete aparte, así que la primera apertura tarda unos segundos.",
     canvasGenerateRevision: "Generar revisión",
     canvasInstructionPlaceholder: "Describe el cambio o anota directamente la imagen…",
     canvasInstructionRequired: "Escribe una instrucción de cambio o dibuja una flecha de anotación.",
@@ -745,6 +763,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "Annoter",
     canvasAnnotatePlaceholder: "Décrivez la modification…",
     canvasEditorHint: "Tracez des flèches d'annotation sur l'image, décrivez la modification, puis générez une révision.",
+    canvasEditorLoading: "Chargement de l'éditeur de détail…",
+    canvasEditorLoadingHint:
+      "Le canevas est chargé séparément : la première ouverture prend quelques secondes.",
     canvasGenerateRevision: "Générer la révision",
     canvasInstructionPlaceholder: "Décrivez la modification, ou annotez directement l'image…",
     canvasInstructionRequired: "Écrivez une consigne de modification ou tracez une flèche d'annotation.",
@@ -849,6 +870,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "Anmerken",
     canvasAnnotatePlaceholder: "Änderung beschreiben…",
     canvasEditorHint: "Zeichne Anmerkungspfeile auf das Bild, beschreibe die Änderung und erzeuge eine Revision.",
+    canvasEditorLoading: "Detailbearbeitung wird geladen…",
+    canvasEditorLoadingHint:
+      "Die Zeichenfläche wird separat geladen, daher dauert das erste Öffnen einige Sekunden.",
     canvasGenerateRevision: "Revision erzeugen",
     canvasInstructionPlaceholder: "Beschreibe die Änderung oder annotiere das Bild direkt…",
     canvasInstructionRequired: "Schreibe eine Änderungsanweisung oder zeichne einen Anmerkungspfeil.",
@@ -953,6 +977,9 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasAnnotate: "Anotar",
     canvasAnnotatePlaceholder: "Descreva a alteração…",
     canvasEditorHint: "Desenhe setas de anotação sobre a imagem, descreva a alteração e gere uma revisão.",
+    canvasEditorLoading: "Carregando o editor de detalhe…",
+    canvasEditorLoadingHint:
+      "A tela é carregada como um pacote separado, então a primeira abertura leva alguns segundos.",
     canvasGenerateRevision: "Gerar revisão",
     canvasInstructionPlaceholder: "Descreva a alteração ou anote a imagem diretamente…",
     canvasInstructionRequired: "Escreva uma instrução de alteração ou desenhe uma seta de anotação.",

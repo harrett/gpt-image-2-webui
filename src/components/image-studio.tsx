@@ -119,6 +119,47 @@ const CanvasEditor = dynamic(
   { ssr: false }
 )
 
+// Fetching that same chunk ahead of the click. Without this the first open is a
+// dead click for as long as the download takes — seconds in production, longer
+// in dev where webpack compiles the chunk on demand. Webpack resolves both
+// `import()` specifiers to one chunk, so this is a warm-up, not a second copy.
+let canvasEditorChunk: Promise<unknown> | null = null
+
+function preloadCanvasEditor() {
+  canvasEditorChunk ??= import("@/components/canvas/canvas-editor")
+  return canvasEditorChunk
+}
+
+// Prefetching costs the user a download they may never need, so skip it when
+// they have asked the browser to conserve data.
+function prefersReducedData() {
+  const connection = (
+    navigator as Navigator & { connection?: { saveData?: boolean } }
+  ).connection
+
+  return Boolean(connection?.saveData)
+}
+
+function whenIdle(run: () => void) {
+  const idle = (
+    window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+      cancelIdleCallback?: (handle: number) => void
+    }
+  ).requestIdleCallback
+
+  if (!idle) {
+    const timeout = window.setTimeout(run, 1200)
+
+    return () => window.clearTimeout(timeout)
+  }
+
+  const handle = idle(run, { timeout: 4000 })
+
+  return () => (window as Window & { cancelIdleCallback?: (handle: number) => void })
+    .cancelIdleCallback?.(handle)
+}
+
 const optionGroupClassName = "studio-option-group"
 const optionItemClassName = "studio-option-item h-8 text-xs hover:bg-muted"
 const CUSTOM_SIZE_OPTION_VALUE = "custom"
@@ -1230,6 +1271,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
   const [editorImageIndex, setEditorImageIndex] = useState<number | null>(null)
+  const [isCanvasEditorLoaded, setIsCanvasEditorLoaded] = useState(false)
   const [isRiskNoticeOpen, setIsRiskNoticeOpen] = useState(false)
   const locale = localeOverride ?? browserLocale
   const text = studioMessages[locale]
@@ -1408,6 +1450,43 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const closeViewer = useCallback(() => {
     setViewerIndex(null)
   }, [])
+
+  const warmCanvasEditor = useCallback(() => {
+    preloadCanvasEditor().then(
+      () => setIsCanvasEditorLoaded(true),
+      () => {
+        // Leave the flag alone: opening the editor retries the import and
+        // reports the failure there, where the user can see it.
+      }
+    )
+  }, [])
+
+  // Opening is instant once the chunk is warm; until then the placeholder below
+  // stands in for the editor so the click has a visible effect.
+  const openDetailEditor = useCallback(
+    (index: number) => {
+      setEditorImageIndex(index)
+      preloadCanvasEditor().then(
+        () => setIsCanvasEditorLoaded(true),
+        (error: unknown) => {
+          canvasEditorChunk = null
+          setEditorImageIndex(null)
+          toast.error(error instanceof Error ? error.message : text.canvasEditorLoading)
+        }
+      )
+    },
+    [text.canvasEditorLoading]
+  )
+
+  // Results are the only thing the editor can be opened from, so their arrival
+  // is the earliest honest signal that the chunk is worth fetching.
+  useEffect(() => {
+    if (isCanvasEditorLoaded || !result?.images.length || prefersReducedData()) {
+      return
+    }
+
+    return whenIdle(warmCanvasEditor)
+  }, [isCanvasEditorLoaded, result?.images.length, warmCanvasEditor])
 
   const acknowledgeRiskNotice = useCallback(() => {
     try {
@@ -2513,7 +2592,9 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                                 size="sm"
                                 variant="secondary"
                                 className="h-9 rounded-md"
-                                onClick={() => setEditorImageIndex(index)}
+                                onClick={() => openDetailEditor(index)}
+                                onFocus={warmCanvasEditor}
+                                onPointerEnter={warmCanvasEditor}
                               >
                                 <PencilRulerIcon data-icon="inline-start" />
                                 {text.canvasEditorTitle}
@@ -2623,14 +2704,23 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           onClose={closeViewer}
           onEdit={(index) => {
             closeViewer()
-            setEditorImageIndex(index)
+            openDetailEditor(index)
           }}
+          onEditHover={warmCanvasEditor}
           onSelect={openViewer}
           onStep={stepViewer}
         />
       )}
 
-      {result && editorImageIndex !== null && result.images[editorImageIndex] && (
+      {result && editorImageIndex !== null && result.images[editorImageIndex] && !isCanvasEditorLoaded && (
+        <CanvasEditorLoading
+          image={result.images[editorImageIndex]}
+          text={text}
+          onCancel={() => setEditorImageIndex(null)}
+        />
+      )}
+
+      {result && editorImageIndex !== null && result.images[editorImageIndex] && isCanvasEditorLoaded && (
         <CanvasEditor
           image={result.images[editorImageIndex]}
           locale={locale}
@@ -2654,6 +2744,67 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
         />
       )}
     </div>
+  )
+}
+
+// Stands in for the detail editor while its chunk is still loading.
+//
+// It deliberately mirrors the editor's own full-screen shell — same header,
+// same title and hint — so the real editor fills this in rather than replacing
+// it. It also covers the studio, which is half the point: without it the click
+// looked like nothing happened, and the canvas arrived seconds later on top of
+// whatever the user had started clicking on next.
+function CanvasEditorLoading({
+  image,
+  text,
+  onCancel,
+}: {
+  image: GeneratedImage
+  text: StudioMessages
+  onCancel: () => void
+}) {
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onCancel()
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown, true)
+
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [onCancel])
+
+  return createPortal(
+    <div className="fixed inset-0 z-100 flex flex-col bg-background">
+      <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+        <div className="mr-auto min-w-0">
+          <p className="text-sm font-medium">{text.canvasEditorTitle}</p>
+          <p className="truncate text-xs text-muted-foreground">{text.canvasEditorHint}</p>
+        </div>
+        <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+          <XIcon className="size-4" />
+          {text.canvasCancel}
+        </Button>
+      </header>
+
+      <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-muted/20 p-6">
+        {/* The image the user clicked, so the wait is obviously about *this*
+            one. Dimmed because it is not editable yet. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          alt=""
+          className="max-h-full max-w-full select-none rounded-md object-contain opacity-20"
+          src={image.src}
+        />
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <LoaderCircleIcon className="size-6 animate-spin text-primary" />
+          <p className="text-sm font-medium text-foreground">{text.canvasEditorLoading}</p>
+          <p className="max-w-sm text-xs text-muted-foreground">{text.canvasEditorLoadingHint}</p>
+        </div>
+      </div>
+    </div>,
+    document.body
   )
 }
 
@@ -2961,6 +3112,7 @@ function ImageViewer({
   workflow,
   onClose,
   onEdit,
+  onEditHover,
   onSelect,
   onStep,
 }: {
@@ -2973,6 +3125,8 @@ function ImageViewer({
   workflow: WorkflowCopy
   onClose: () => void
   onEdit: (index: number) => void
+  /** Warms the editor chunk before the click, so opening it feels immediate. */
+  onEditHover: () => void
   onSelect: (index: number) => void
   onStep: (step: number) => void
 }) {
@@ -3141,6 +3295,8 @@ function ImageViewer({
             variant="secondary"
             className="rounded-md"
             onClick={() => onEdit(index)}
+            onFocus={onEditHover}
+            onPointerEnter={onEditHover}
           >
             <PencilRulerIcon data-icon="inline-start" />
             <span className="hidden sm:inline">{editLabel}</span>
@@ -3253,6 +3409,8 @@ function ImageViewer({
             size="lg"
             className="min-w-48 rounded-md shadow-lg"
             onClick={() => onEdit(index)}
+            onFocus={onEditHover}
+            onPointerEnter={onEditHover}
           >
             <PencilRulerIcon data-icon="inline-start" />
             {editLabel}
