@@ -238,7 +238,7 @@ export const studioMessages: Record<Locale, StudioMessages> = {
     canvasApplied: "已把编辑后的图片作为新一代结果。",
     transferTitle: "耗时分布",
     transferWaitingLabel: "等待服务器生成",
-    transferDownloadLabel: "下载图片数据",
+    transferDownloadLabel: "下载图片文件",
     transferDownloadPending: "排队中",
     transferSpeedMeasuring: "测速中…",
     transferEtaLabel: "约剩 {value}",
@@ -1001,48 +1001,48 @@ export const studioMessages: Record<Locale, StudioMessages> = {
 
 export const studioPromptPresets: Record<Locale, string[]> = {
   en: [
-    "Editorial portrait of a woman wearing silk under hard cinematic key light, 35mm film grain, neutral cool palette, magazine cover aesthetic.",
     "Premium skincare hero shot: frosted glass bottle on cold marble, condensation droplets, soft beauty dish lighting, minimal commercial composition.",
+    "Editorial portrait of a woman wearing silk under hard cinematic key light, 35mm film grain, neutral cool palette, magazine cover aesthetic.",
     "Reimagine the uploaded product as a high-end e-commerce hero: keep silhouette, add refined material detail, dramatic studio lighting and luxury backdrop.",
   ],
   zh: [
-    "一位女性身穿丝质面料的 editorial 风格人像，硬朗电影感主光，35mm 胶片颗粒，冷中性色调，杂志封面质感。",
     "高端护肤品主视觉：磨砂玻璃瓶置于冷色大理石台面，表面有冷凝水珠，柔和美容灯光，极简商业构图。",
+    "一位女性身穿丝质面料的 editorial 风格人像，硬朗电影感主光，35mm 胶片颗粒，冷中性色调，杂志封面质感。",
     "将上传的产品重塑为高端电商主图：保留原始轮廓，强化材质细节，使用戏剧化棚拍光线与奢华背景。",
   ],
   "zh-TW": [
-    "一位女性身穿絲質面料的 editorial 風格人像，硬朗電影感主光，35mm 膠片顆粒，冷中性色調，雜誌封面質感。",
     "高端保養品主視覺：磨砂玻璃瓶置於冷色大理石台面，表面有冷凝水珠，柔和美容燈光，極簡商業構圖。",
+    "一位女性身穿絲質面料的 editorial 風格人像，硬朗電影感主光，35mm 膠片顆粒，冷中性色調，雜誌封面質感。",
     "將上傳的產品重塑為高端電商主圖：保留原始輪廓，強化材質細節，使用戲劇化棚拍光線與奢華背景。",
   ],
   ja: [
-    "透け感のあるシルクをまとった女性のエディトリアルポートレート。硬い映画的キーライト、35mmフィルム粒子、クールなニュートラル配色。",
     "高級スキンケアのヒーローショット。曇りガラスのボトル、冷たい大理石、結露、柔らかなビューティーライト、ミニマルな商業構図。",
+    "透け感のあるシルクをまとった女性のエディトリアルポートレート。硬い映画的キーライト、35mmフィルム粒子、クールなニュートラル配色。",
     "アップロードした商品を高級ECヒーロー画像として再構成。輪郭を保ち、素材感、ドラマチックなスタジオ光、ラグジュアリー背景を追加。",
   ],
   ko: [
-    "반투명 실크를 입은 여성의 에디토리얼 포트레이트, 강한 영화적 키 라이트, 35mm 필름 그레인, 차가운 뉴트럴 팔레트.",
     "프리미엄 스킨케어 히어로샷: 차가운 대리석 위의 프로스트 유리병, 물방울, 부드러운 뷰티 조명, 미니멀한 상업 구도.",
+    "반투명 실크를 입은 여성의 에디토리얼 포트레이트, 강한 영화적 키 라이트, 35mm 필름 그레인, 차가운 뉴트럴 팔레트.",
     "업로드한 제품을 고급 이커머스 히어로 이미지로 재구성: 실루엣 유지, 정교한 소재감, 드라마틱한 스튜디오 조명과 럭셔리 배경.",
   ],
   es: [
-    "Retrato editorial de una mujer con seda translúcida, luz clave cinematográfica dura, grano de 35mm, paleta neutra fría, estética de portada.",
     "Hero shot premium de skincare: botella de vidrio esmerilado sobre mármol frío, gotas de condensación, luz beauty suave, composición comercial minimalista.",
+    "Retrato editorial de una mujer con seda translúcida, luz clave cinematográfica dura, grano de 35mm, paleta neutra fría, estética de portada.",
     "Reimagina el producto subido como hero de e-commerce de lujo: conserva la silueta, añade detalle material, luz dramática de estudio y fondo premium.",
   ],
   fr: [
-    "Portrait éditorial d'une femme en soie translucide, lumière clé cinématographique dure, grain 35mm, palette neutre froide, esthétique couverture magazine.",
     "Hero shot skincare premium : flacon en verre dépoli sur marbre froid, condensation, éclairage beauté doux, composition commerciale minimale.",
+    "Portrait éditorial d'une femme en soie translucide, lumière clé cinématographique dure, grain 35mm, palette neutre froide, esthétique couverture magazine.",
     "Réinventer le produit importé en visuel e-commerce haut de gamme : silhouette conservée, détails matière raffinés, éclairage studio dramatique et décor luxe.",
   ],
   de: [
-    "Editorial-Porträt einer Frau in transluzenter Seide, hartes filmisches Key Light, 35mm-Filmkorn, kühle neutrale Palette, Magazincover-Ästhetik.",
     "Premium-Skincare-Hero-Shot: mattierte Glasflasche auf kaltem Marmor, Kondensation, weiches Beauty-Licht, minimale kommerzielle Komposition.",
+    "Editorial-Porträt einer Frau in transluzenter Seide, hartes filmisches Key Light, 35mm-Filmkorn, kühle neutrale Palette, Magazincover-Ästhetik.",
     "Das hochgeladene Produkt als hochwertiges E-Commerce-Hero neu inszenieren: Silhouette behalten, Materialdetails, dramatisches Studiolicht und Luxus-Backdrop.",
   ],
   pt: [
-    "Retrato editorial de uma mulher com seda translúcida, luz principal cinematográfica intensa, grão 35mm, paleta neutra fria, estética de capa.",
     "Hero shot premium de skincare: frasco de vidro fosco sobre mármore frio, gotas de condensação, luz beauty suave, composição comercial minimalista.",
+    "Retrato editorial de uma mulher com seda translúcida, luz principal cinematográfica intensa, grão 35mm, paleta neutra fria, estética de capa.",
     "Reimagine o produto enviado como hero de e-commerce premium: mantenha a silhueta, adicione detalhes de material, luz dramática de estúdio e fundo luxuoso.",
   ],
 }
