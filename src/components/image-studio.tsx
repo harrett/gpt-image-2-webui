@@ -81,7 +81,7 @@ import {
 } from "@/lib/connection-preferences"
 import { ImageRequestError, isRetryableImageError, type GeneratedImage } from "@/lib/image-request"
 import { getSizeDimensions, normalizeCustomSize } from "@/lib/image-size"
-import { extractSuggestedPrompt, normalizeRefusalText } from "@/lib/prompt-suggestion"
+import { extractPromptSuggestions, normalizeRefusalText } from "@/lib/prompt-suggestion"
 import {
   formatBytes,
   readPayloadBytes,
@@ -990,11 +990,11 @@ type UploadPreview = {
   url: string
 }
 
-// A prompt the API refused, together with the rewrite it offered — `suggestion`
-// is null when the refusal came with no alternative.
+// A prompt the API refused, together with the rewrites it offered. Refusals
+// come with one, several, or none; `suggestions` is empty in the last case.
 type RefusalNotice = {
   message: string
-  suggestion: string | null
+  suggestions: string[]
 }
 
 type ActiveSource = {
@@ -1466,7 +1466,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
         getGenerationErrorMessage(error, studioMessages[locale].generationFailed)
       )
 
-      setRefusalNotice({ message, suggestion: extractSuggestedPrompt(message) })
+      setRefusalNotice({ message, suggestions: extractPromptSuggestions(message) })
     },
     [locale]
   )
@@ -3088,7 +3088,9 @@ function PromptRefusalDialog({
   onClose: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
-  const [draft, setDraft] = useState(notice.suggestion ?? "")
+  const [draft, setDraft] = useState(notice.suggestions[0] ?? "")
+  const hasSuggestions = notice.suggestions.length > 0
+  const hasChoice = notice.suggestions.length > 1
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -3144,11 +3146,33 @@ function PromptRefusalDialog({
               </p>
             </div>
 
-            {notice.suggestion ? (
+            {hasSuggestions ? (
               <div className="space-y-2">
                 <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                  {text.refusalSuggestionTitle}
+                  {hasChoice ? text.refusalSuggestionPick : text.refusalSuggestionTitle}
                 </p>
+                {hasChoice ? (
+                  // A refusal often answers with a menu of directions rather
+                  // than one rewrite. Picking loads it into the box below, so
+                  // the choice and the editing stay in one place.
+                  <div className="grid gap-2">
+                    {notice.suggestions.map((suggestion, index) => (
+                      <button
+                        key={`${index}-${suggestion.slice(0, 24)}`}
+                        type="button"
+                        className={cn(
+                          "rounded-md border px-3 py-2 text-left text-sm leading-6 transition-colors hover:bg-muted/60",
+                          draft === suggestion
+                            ? "border-primary bg-primary/10"
+                            : "bg-muted/25"
+                        )}
+                        onClick={() => setDraft(suggestion)}
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <Textarea
                   autoFocus
                   className="min-h-32 resize-y text-sm leading-7"
@@ -3172,7 +3196,7 @@ function PromptRefusalDialog({
             >
               {text.refusalDismiss}
             </Button>
-            {notice.suggestion ? (
+            {hasSuggestions ? (
               <Button
                 type="button"
                 size="lg"
