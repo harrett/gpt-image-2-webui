@@ -79,8 +79,9 @@ import {
   readStoredConnectionPreferences,
   writeStoredConnectionPreferences,
 } from "@/lib/connection-preferences"
-import { type GeneratedImage } from "@/lib/image-request"
+import { ImageRequestError, isRetryableImageError, type GeneratedImage } from "@/lib/image-request"
 import { getSizeDimensions, normalizeCustomSize } from "@/lib/image-size"
+import { extractSuggestedPrompt, normalizeRefusalText } from "@/lib/prompt-suggestion"
 import {
   formatBytes,
   readPayloadBytes,
@@ -989,6 +990,13 @@ type UploadPreview = {
   url: string
 }
 
+// A prompt the API refused, together with the rewrite it offered — `suggestion`
+// is null when the refusal came with no alternative.
+type RefusalNotice = {
+  message: string
+  suggestion: string | null
+}
+
 type ActiveSource = {
   label: string
   promptSnapshot: string
@@ -1272,6 +1280,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
   const [editorImageIndex, setEditorImageIndex] = useState<number | null>(null)
   const [isCanvasEditorLoaded, setIsCanvasEditorLoaded] = useState(false)
+  const [refusalNotice, setRefusalNotice] = useState<RefusalNotice | null>(null)
   const [isRiskNoticeOpen, setIsRiskNoticeOpen] = useState(false)
   const locale = localeOverride ?? browserLocale
   const text = studioMessages[locale]
@@ -1450,6 +1459,26 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const closeViewer = useCallback(() => {
     setViewerIndex(null)
   }, [])
+
+  const openRefusalNotice = useCallback(
+    (error: unknown) => {
+      const message = normalizeRefusalText(
+        getGenerationErrorMessage(error, studioMessages[locale].generationFailed)
+      )
+
+      setRefusalNotice({ message, suggestion: extractSuggestedPrompt(message) })
+    },
+    [locale]
+  )
+
+  const applySuggestedPrompt = useCallback(
+    (suggestion: string) => {
+      updatePrompt(suggestion)
+      setRefusalNotice(null)
+      toast.success(t(locale, "refusalApplied"))
+    },
+    [locale, updatePrompt]
+  )
 
   const warmCanvasEditor = useCallback(() => {
     preloadCanvasEditor().then(
@@ -1783,19 +1812,23 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     try {
       payload = JSON.parse(body)
     } catch {
-      throw new Error(
+      throw new ImageRequestError(
         response.ok
           ? t(locale, "noImageInPayload")
-          : t(locale, "requestFailedStatus", { status: response.status })
+          : t(locale, "requestFailedStatus", { status: response.status }),
+        response.status
       )
     }
 
     if (!response.ok) {
-      throw new Error(payload.error || t(locale, "requestFailedStatus", { status: response.status }))
+      throw new ImageRequestError(
+        payload.error || t(locale, "requestFailedStatus", { status: response.status }),
+        response.status
+      )
     }
 
     if (!payload.images?.length) {
-      throw new Error(t(locale, "noImageInPayload"))
+      throw new ImageRequestError(t(locale, "noImageInPayload"), response.status)
     }
 
     return {
@@ -1837,6 +1870,9 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     const createdAt = Date.now()
     const serial = (canvasSerialRef.current += 1)
     let firstError: unknown = null
+    // Set by an error that says "this request is not acceptable" rather than
+    // "try again". It stops the run dead: see isRetryableImageError.
+    let refusal: unknown = null
 
     try {
       const images: GeneratedImage[] = []
@@ -1890,10 +1926,17 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           if (!firstError) {
             firstError = error
           }
+
+          if (!refusal && !isRetryableImageError(error)) {
+            refusal = error
+          }
         }
       }
 
-      while (images.length < total && attempts < maxAttempts) {
+      // `refusal` breaks the loop so a rejected prompt costs exactly one request
+      // per slot instead of maxAttempts. Retrying a moderation refusal cannot
+      // succeed and files repeat violations against the account behind the key.
+      while (images.length < total && attempts < maxAttempts && !refusal) {
         const batchSize = Math.min(total - images.length, maxAttempts - attempts)
         attempts += batchSize
 
@@ -1912,7 +1955,11 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       setSelectedImageIndex((current) => current < visibleImages.length ? current : 0)
       setProgress(100)
 
-      if (visibleImages.length < total && firstError) {
+      if (visibleImages.length < total && refusal) {
+        // The run produced something, but the refusal still holds the rewrite
+        // the user needs to get the missing slots.
+        openRefusalNotice(refusal)
+      } else if (visibleImages.length < total && firstError) {
         toast.warning(
           t(locale, "generatedPartialWarning", {
             count: visibleImages.length,
@@ -1935,7 +1982,15 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
         progressResetTimeoutRef.current = null
       }, 900)
     } catch (error) {
-      toast.error(getGenerationErrorMessage(error, text.generationFailed))
+      // A refusal is several sentences of the model's own wording, and often
+      // carries the rewrite it *would* accept — far too much to flash past in a
+      // toast, so it gets a dialog instead.
+      if (error instanceof ImageRequestError && !isRetryableImageError(error)) {
+        openRefusalNotice(error)
+      } else {
+        toast.error(getGenerationErrorMessage(error, text.generationFailed))
+      }
+
       setProgress(0)
       transfer.reset()
     } finally {
@@ -2736,6 +2791,15 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
         />
       )}
 
+      {refusalNotice && (
+        <PromptRefusalDialog
+          notice={refusalNotice}
+          text={text}
+          onApply={applySuggestedPrompt}
+          onClose={() => setRefusalNotice(null)}
+        />
+      )}
+
       {isRiskNoticeOpen && (
         <RiskNoticeDialog
           copy={riskNotice}
@@ -3003,6 +3067,129 @@ function PendingImageCard() {
 
 function subscribeToNothing() {
   return () => {}
+}
+
+// What the user sees when the API refuses a prompt.
+//
+// The refusal itself is the important part — it is the only description of what
+// crossed the line — and it usually ends with a rewrite the model would accept.
+// That rewrite is put in an editable box rather than applied silently: it is a
+// suggestion from a third party about the user's own creative work, so the
+// choice to take it, reword it, or ignore it stays with them.
+function PromptRefusalDialog({
+  notice,
+  text,
+  onApply,
+  onClose,
+}: {
+  notice: RefusalNotice
+  text: StudioMessages
+  onApply: (prompt: string) => void
+  onClose: () => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const [draft, setDraft] = useState(notice.suggestion ?? "")
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+
+    if (!dialog) {
+      return
+    }
+
+    dialog.showModal()
+
+    return () => {
+      if (dialog.open) {
+        dialog.close()
+      }
+    }
+  }, [])
+
+  const trimmedDraft = draft.trim()
+
+  return createPortal(
+    <dialog
+      ref={dialogRef}
+      aria-describedby="prompt-refusal-message"
+      aria-labelledby="prompt-refusal-title"
+      className="m-0 h-dvh max-h-none w-screen max-w-none bg-transparent p-0 text-foreground backdrop:bg-black/75 backdrop:backdrop-blur-md"
+      onCancel={(event) => {
+        event.preventDefault()
+        onClose()
+      }}
+    >
+      <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+        <section className="w-full max-w-2xl overflow-hidden rounded-xl border border-destructive/35 bg-card shadow-[0_32px_120px_-28px_rgba(0,0,0,0.95)]">
+          <div className="border-b border-destructive/20 bg-destructive/8 px-5 py-4 sm:px-6">
+            <div className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-wide text-destructive uppercase">
+              <TriangleAlertIcon className="size-4" />
+              {text.refusalEyebrow}
+            </div>
+            <h2 id="prompt-refusal-title" className="text-lg font-semibold tracking-tight sm:text-xl">
+              {text.refusalTitle}
+            </h2>
+          </div>
+
+          <div className="space-y-4 px-5 py-5 sm:px-6">
+            <div className="space-y-2">
+              <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                {text.refusalMessageLabel}
+              </p>
+              <p
+                id="prompt-refusal-message"
+                className="max-h-40 overflow-y-auto rounded-md border bg-muted/30 px-3 py-2 text-sm leading-7 whitespace-pre-wrap"
+              >
+                {notice.message}
+              </p>
+            </div>
+
+            {notice.suggestion ? (
+              <div className="space-y-2">
+                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  {text.refusalSuggestionTitle}
+                </p>
+                <Textarea
+                  autoFocus
+                  className="min-h-32 resize-y text-sm leading-7"
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">{text.refusalSuggestionHint}</p>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">{text.refusalNoSuggestion}</p>
+            )}
+          </div>
+
+          <div className="flex flex-wrap justify-end gap-2 border-t bg-muted/25 px-5 py-4 sm:px-6">
+            <Button
+              type="button"
+              size="lg"
+              variant="outline"
+              className="h-auto min-h-10 rounded-md px-4 whitespace-normal"
+              onClick={onClose}
+            >
+              {text.refusalDismiss}
+            </Button>
+            {notice.suggestion ? (
+              <Button
+                type="button"
+                size="lg"
+                className="h-auto min-h-10 rounded-md px-4 whitespace-normal"
+                disabled={!trimmedDraft}
+                onClick={() => onApply(trimmedDraft)}
+              >
+                <PencilRulerIcon data-icon="inline-start" />
+                {text.refusalApply}
+              </Button>
+            ) : null}
+          </div>
+        </section>
+      </div>
+    </dialog>,
+    document.body
+  )
 }
 
 function RiskNoticeDialog({

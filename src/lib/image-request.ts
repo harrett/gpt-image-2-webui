@@ -9,6 +9,42 @@ export type GeneratedImage = {
   src: string
 }
 
+/**
+ * A failed `/api/images` call, carrying the status so callers can tell a
+ * transient failure from a verdict on the request itself.
+ */
+export class ImageRequestError extends Error {
+  readonly status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = "ImageRequestError"
+    this.status = status
+  }
+}
+
+/**
+ * Whether sending the same request again could plausibly succeed.
+ *
+ * A 4xx is the upstream judging *this* request — a moderation refusal, a
+ * rejected key, an unsupported size — and repeating it returns the same
+ * verdict. For refusals that is actively harmful: each retry files another
+ * policy violation against the account behind the key, which is how accounts
+ * get suspended. 429 counts as a refusal here for the same reason: hammering a
+ * rate limit is how a soft limit becomes a hard one.
+ *
+ * Everything else — a `fetch` that never got a response, a 5xx, a 200 whose
+ * body carried no image — is the upstream having a bad moment, and is worth
+ * another attempt.
+ */
+export function isRetryableImageError(error: unknown) {
+  if (!(error instanceof ImageRequestError)) {
+    return true
+  }
+
+  return error.status < 400 || error.status >= 500
+}
+
 export function normalizeOpenAIBaseURL(value: string, locale: Locale = DEFAULT_LOCALE) {
   const rawEndpoint = (value || DEFAULT_OPENAI_BASE_URL).trim().replace(/\/+$/, "")
 
