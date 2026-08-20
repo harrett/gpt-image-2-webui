@@ -2399,14 +2399,14 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                   </Select>
                 </Field>
 
-                <Field>
-                  <FieldLabel className="text-xs font-semibold text-muted-foreground">
-                    {text.connectionInterfaceLabel}
-                  </FieldLabel>
-                  <div className="studio-control flex h-11 items-center rounded-md border bg-muted/30 px-3 text-xs text-muted-foreground">
-                    {text.connectionInterfaceValue}
-                  </div>
-                </Field>
+                {/*<Field>*/}
+                {/*  <FieldLabel className="text-xs font-semibold text-muted-foreground">*/}
+                {/*    {text.connectionInterfaceLabel}*/}
+                {/*  </FieldLabel>*/}
+                {/*  <div className="studio-control flex h-11 items-center rounded-md border bg-muted/30 px-3 text-xs text-muted-foreground">*/}
+                {/*    {text.connectionInterfaceValue}*/}
+                {/*  </div>*/}
+                {/*</Field>*/}
 
                 <Field>
                   <FieldLabel
@@ -2518,14 +2518,14 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                 </Badge>
               )}
             </div>
-            <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">
-              <KeyRoundIcon className="size-3" />
-              {apiKey ? text.keySet : text.noKey}
-              <span className="text-border">·</span>
-              <span className="text-[11px]">
-                {text.connectionInterfaceValue}
-              </span>
-            </div>
+            {/*<div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground shadow-sm sm:flex">*/}
+            {/*  <KeyRoundIcon className="size-3" />*/}
+            {/*  {apiKey ? text.keySet : text.noKey}*/}
+            {/*  <span className="text-border">·</span>*/}
+            {/*  <span className="text-[11px]">*/}
+            {/*    {text.connectionInterfaceValue}*/}
+            {/*  </span>*/}
+            {/*</div>*/}
           </div>
 
           {(canvases.length > 0 || isGenerating) && (
