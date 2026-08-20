@@ -112,6 +112,10 @@ import { cn } from "@/lib/utils"
 const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
+const IMAGE_COUNT_OPTIONS = [1, 2, 3, 4]
+// Counts above this are shown but locked behind a membership tier. UI-only gate:
+// the server still accepts any count, so this is presentation, not enforcement.
+const MAX_UNLOCKED_IMAGE_COUNT = 2
 // The canvas library is ~1MB and touches window at module scope: keep it out
 // of the studio bundle and off the server render, loading it only when the user
 // opens the detail editor.
@@ -1270,6 +1274,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [outputFormat, setOutputFormat] = useState("png")
   const [background, setBackground] = useState("auto")
   const [imageCount, setImageCount] = useState(1)
+  const [lockedCountHint, setLockedCountHint] = useState<number | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const transfer = useTransferProgress()
@@ -1855,7 +1860,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       return
     }
 
-    const total = Math.min(Math.max(imageCount, 1), 4)
+    const total = Math.min(Math.max(imageCount, 1), MAX_UNLOCKED_IMAGE_COUNT)
 
     setIsGenerating(true)
     setProgress(0)
@@ -2306,26 +2311,61 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                     </FieldLabel>
                     <span className="font-mono text-xs text-foreground">×{imageCount}</span>
                   </div>
-                  <ToggleGroup
-                    spacing={2}
-                    value={[String(imageCount)]}
-                    variant="outline"
-                    onValueChange={(values) => {
-                      const next = values.at(-1)
-                      if (next) setImageCount(Number(next))
-                    }}
-                    className={cn("grid w-full grid-cols-4", optionGroupClassName)}
-                  >
-                    {[1, 2, 3, 4].map((value) => (
-                      <ToggleGroupItem
-                        key={value}
-                        value={String(value)}
-                        className={optionItemClassName}
+                  <div className="relative">
+                    <ToggleGroup
+                      spacing={2}
+                      value={[String(imageCount)]}
+                      variant="outline"
+                      onValueChange={(values) => {
+                        const next = values.at(-1)
+
+                        if (!next || Number(next) > MAX_UNLOCKED_IMAGE_COUNT) {
+                          return
+                        }
+
+                        setImageCount(Number(next))
+                      }}
+                      className={cn("grid w-full grid-cols-4", optionGroupClassName)}
+                    >
+                      {IMAGE_COUNT_OPTIONS.map((value) => {
+                        const isLocked = value > MAX_UNLOCKED_IMAGE_COUNT
+
+                        return (
+                          <ToggleGroupItem
+                            key={value}
+                            value={String(value)}
+                            // aria-disabled rather than disabled: a disabled toggle gets
+                            // pointer-events-none, which would swallow the hover that
+                            // reveals the upgrade hint.
+                            aria-disabled={isLocked || undefined}
+                            aria-describedby={
+                              isLocked && lockedCountHint === value ? "image-count-locked-hint" : undefined
+                            }
+                            className={cn(
+                              optionItemClassName,
+                              isLocked &&
+                                "cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60"
+                            )}
+                            onMouseEnter={isLocked ? () => setLockedCountHint(value) : undefined}
+                            onMouseLeave={isLocked ? () => setLockedCountHint(null) : undefined}
+                            onFocus={isLocked ? () => setLockedCountHint(value) : undefined}
+                            onBlur={isLocked ? () => setLockedCountHint(null) : undefined}
+                          >
+                            {value}
+                          </ToggleGroupItem>
+                        )
+                      })}
+                    </ToggleGroup>
+                    {lockedCountHint !== null && (
+                      <div
+                        id="image-count-locked-hint"
+                        role="tooltip"
+                        className="pointer-events-none absolute bottom-full left-0 right-0 z-20 mb-2 rounded-md border bg-popover px-3 py-2 text-xs leading-relaxed text-foreground shadow-lg"
                       >
-                        {value}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
+                        {text.imageCountLockedHint}
+                      </div>
+                    )}
+                  </div>
                   <FieldDescription className="text-xs">
                     {t(locale, "countDescription", { count: imageCount })}
                   </FieldDescription>
