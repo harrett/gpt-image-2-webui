@@ -411,13 +411,19 @@ export function CanvasEditor({
 
       const api = apiRef.current
 
-      // Escape belongs to the canvas first: it finishes a label, cancels a
+      // Escape belongs to the canvas first: it backs out of a label, cancels a
       // drag, or clears the selection. Closing the whole editor is only the
       // *idle* meaning of the key, otherwise one Escape would discard the
-      // annotation the user was still typing.
+      // annotation the user was still typing. This listener is on capture, so
+      // it runs before the label input's own handler and has to defer here —
+      // stopPropagation from the input would come too late.
       const appState = api?.getAppState()
 
-      if (appState?.editingTextElement || Object.keys(appState?.selectedElementIds ?? {}).length) {
+      if (
+        annotation.composer ||
+        appState?.editingTextElement ||
+        Object.keys(appState?.selectedElementIds ?? {}).length
+      ) {
         return
       }
 
@@ -427,7 +433,7 @@ export function CanvasEditor({
     window.addEventListener("keydown", handleKeyDown, true)
 
     return () => window.removeEventListener("keydown", handleKeyDown, true)
-  }, [isGenerating, onClose])
+  }, [annotation.composer, isGenerating, onClose])
 
   const hasRevisions = versions.length > 1
 
@@ -528,6 +534,7 @@ export function CanvasEditor({
         <AnnotationComposer
           composer={annotation.composer}
           onCommit={annotation.commit}
+          onCancel={annotation.cancel}
           placeholder={t(locale, "canvasAnnotatePlaceholder")}
         />
         <Excalidraw

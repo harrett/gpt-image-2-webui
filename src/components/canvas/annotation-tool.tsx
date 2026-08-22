@@ -51,8 +51,11 @@ const MAX_BEND = 48
 type Point = { x: number; y: number }
 
 type Composer = {
-  arrowId: string
-  groupId: string
+  /** The arrow being labelled. Null when re-editing a label that already exists. */
+  arrowId: string | null
+  groupId: string | null
+  /** The label being rewritten, when this is an edit rather than a new one. */
+  editingId: string | null
   /** Where to put the input, relative to Excalidraw's own top-left corner. */
   left: number
   top: number
@@ -60,7 +63,29 @@ type Composer = {
   flipped: boolean
   /** The arrow's own colour, which the label inherits. */
   color: string
+  initialText: string
+  /** Opacity the edited label had before it was hidden behind the input. */
+  restoreOpacity: number | null
   zoom: number
+}
+
+/** The topmost text element under a scene point, if any. */
+function textElementAt(elements: readonly ExcalidrawElement[], point: Point) {
+  for (let index = elements.length - 1; index >= 0; index -= 1) {
+    const element = elements[index]
+
+    if (
+      element.type === "text" &&
+      point.x >= element.x &&
+      point.x <= element.x + element.width &&
+      point.y >= element.y &&
+      point.y <= element.y + element.height
+    ) {
+      return element
+    }
+  }
+
+  return null
 }
 
 function arrowEnds(arrow: ExcalidrawElement) {
@@ -197,11 +222,26 @@ export function useAnnotationTool(api: ExcalidrawImperativeAPI | null) {
       }
 
       const trimmed = text.trim()
-      const arrow = trimmed
-        ? api.getSceneElements().find((element) => element.id === pending.arrowId)
+      const scene = api.getSceneElements()
+      const previous = pending.editingId
+        ? scene.find((element) => element.id === pending.editingId)
         : null
+      const groupId = pending.groupId ?? previous?.groupIds[0] ?? null
+      // Re-editing keeps the label glued to its arrow, so a longer or shorter
+      // rewrite re-anchors instead of drifting off the tail.
+      const arrow = scene.find((element) =>
+        pending.arrowId
+          ? element.id === pending.arrowId
+          : element.type === "arrow" && !!groupId && element.groupIds.includes(groupId)
+      )
+      const rest = previous ? scene.filter((element) => element.id !== previous.id) : scene
 
-      if (arrow) {
+      if (!trimmed) {
+        // Emptying an existing label removes it; the arrow stays.
+        if (previous) {
+          api.updateScene({ elements: rest })
+        }
+      } else if (arrow || previous) {
         // convertToExcalidrawElements measures the text for us, so the label is
         // anchored using its real size rather than a guess.
         const [measured] = convertToExcalidrawElements([
@@ -215,15 +255,23 @@ export function useAnnotationTool(api: ExcalidrawImperativeAPI | null) {
             // The label is part of the arrow, so it takes the arrow's colour
             // rather than the mode's default — otherwise a black arrow ends up
             // captioned in red.
-            strokeColor: arrow.strokeColor,
+            strokeColor: arrow?.strokeColor ?? pending.color,
           },
         ])
-        const at = labelPosition(arrow, measured.width, measured.height)
+        const at = arrow
+          ? labelPosition(arrow, measured.width, measured.height)
+          : { x: previous!.x, y: previous!.y }
 
         api.updateScene({
           elements: [
-            ...api.getSceneElements(),
-            { ...measured, x: at.x, y: at.y, groupIds: [pending.groupId] } as ExcalidrawElement,
+            ...rest,
+            {
+              ...measured,
+              x: at.x,
+              y: at.y,
+              opacity: pending.restoreOpacity ?? measured.opacity,
+              groupIds: groupId ? [groupId] : [],
+            } as ExcalidrawElement,
           ],
         })
       }
@@ -235,6 +283,34 @@ export function useAnnotationTool(api: ExcalidrawImperativeAPI | null) {
     },
     [api, openComposer]
   )
+
+  /**
+   * Back out without touching the scene. Distinct from committing an empty
+   * string, which is how a label gets deleted — abandoning an edit has to leave
+   * the original text exactly as it was.
+   */
+  const cancel = useCallback(() => {
+    const pending = composerRef.current
+
+    openComposer(null)
+
+    if (!api || !pending?.editingId) {
+      return
+    }
+
+    api.updateScene({
+      elements: api.getSceneElements().map((element) =>
+        element.id === pending.editingId
+          ? ({
+              ...element,
+              opacity: pending.restoreOpacity ?? element.opacity,
+              version: element.version + 1,
+              versionNonce: Date.now(),
+            } as ExcalidrawElement)
+          : element
+      ),
+    })
+  }, [api, openComposer])
 
   useEffect(() => {
     if (!api) {
@@ -263,11 +339,65 @@ export function useAnnotationTool(api: ExcalidrawImperativeAPI | null) {
         // The arrow can be undone or deleted while its label is still being
         // typed; without this the composer would sit there pointing at nothing
         // and block every later drag from being picked up.
-        if (!elements.some((element) => element.id === composerRef.current?.arrowId)) {
+        const anchorId = composerRef.current.arrowId ?? composerRef.current.editingId
+
+        if (!elements.some((element) => element.id === anchorId)) {
           openComposer(null)
         }
 
         rememberArrows(elements)
+        return
+      }
+
+      // A click that did not drag puts Excalidraw's linear tools into their
+      // pen-style mode: it leaves a half-finished arrow in the scene and waits
+      // for more clicks to add points (App.tsx, `!pointerDownState.drag
+      // .hasOccurred` branch). An annotation is one drag, so that mode is
+      // cancelled here — and the click is spent on something more useful:
+      // re-opening the label under the cursor for editing, which is otherwise
+      // unreachable while the arrow tool is armed.
+      if (state.multiElement) {
+        const pending = state.multiElement
+        const remaining = elements.filter((element) => element.id !== pending.id)
+        const label = textElementAt(remaining, { x: pending.x, y: pending.y })
+
+        api.updateScene({
+          // The label being rewritten is hidden rather than left underneath the
+          // input, where the old and new text render on top of each other.
+          elements: remaining.map((element) =>
+            element.id === label?.id
+              ? ({
+                  ...element,
+                  opacity: 0,
+                  version: element.version + 1,
+                  versionNonce: Date.now(),
+                } as ExcalidrawElement)
+              : element
+          ),
+          appState: { multiElement: null, newElement: null, selectedElementIds: {} },
+        })
+        rememberArrows(remaining)
+
+        if (label) {
+          const viewport = sceneCoordsToViewportCoords(
+            { sceneX: label.x, sceneY: label.y + label.height / 2 },
+            state as AppState
+          )
+
+          openComposer({
+            arrowId: null,
+            groupId: label.groupIds[0] ?? null,
+            editingId: label.id,
+            left: viewport.x - state.offsetLeft,
+            top: viewport.y - state.offsetTop,
+            flipped: false,
+            color: label.strokeColor,
+            initialText: (label as unknown as { text: string }).text,
+            restoreOpacity: label.opacity,
+            zoom: state.zoom.value,
+          })
+        }
+
         return
       }
 
@@ -366,6 +496,9 @@ export function useAnnotationTool(api: ExcalidrawImperativeAPI | null) {
       openComposer({
         arrowId: arrow.id,
         groupId,
+        editingId: null,
+        initialText: "",
+        restoreOpacity: null,
         // sceneCoordsToViewportCoords works in page coordinates — it adds the
         // canvas's own offset within the document. The input is positioned
         // against Excalidraw's box, so that offset has to come back off, or the
@@ -379,7 +512,7 @@ export function useAnnotationTool(api: ExcalidrawImperativeAPI | null) {
     })
   }, [api, openComposer, setActive])
 
-  return { isActive, toggle, composer, commit }
+  return { isActive, toggle, composer, commit, cancel }
 }
 
 /**
@@ -389,10 +522,20 @@ export function useAnnotationTool(api: ExcalidrawImperativeAPI | null) {
 export function AnnotationComposer({
   composer,
   onCommit,
+  onCancel,
   placeholder,
 }: {
-  composer: { left: number; top: number; flipped: boolean; color: string; zoom: number } | null
+  composer: {
+    left: number
+    top: number
+    flipped: boolean
+    color: string
+    initialText: string
+    editingId: string | null
+    zoom: number
+  } | null
   onCommit: (text: string) => void
+  onCancel: () => void
   placeholder: string
 }) {
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
@@ -426,6 +569,9 @@ export function AnnotationComposer({
       } else {
         held = 0
         input.focus({ preventScroll: true })
+        // Caret at the end, so re-opening a label to fix a typo starts where
+        // the text left off rather than in front of it.
+        input.setSelectionRange(input.value.length, input.value.length)
       }
 
       if (frames++ < FOCUS_CLAIM_FRAMES) {
@@ -446,9 +592,9 @@ export function AnnotationComposer({
 
   return (
     <textarea
-      // Uncontrolled and keyed on the composer, so each new annotation gets a
-      // freshly empty box without a state reset inside an effect.
-      key={`${composer.left}:${composer.top}`}
+      // Uncontrolled and keyed on the composer, so each annotation opens the box
+      // at its own starting text without a state reset inside an effect.
+      key={`${composer.editingId ?? "new"}:${composer.left}:${composer.top}`}
       ref={inputRef}
       className="imgx-annotate-composer"
       style={{
@@ -460,18 +606,18 @@ export function AnnotationComposer({
         // horizontally, so the box covers the same ground as the label will.
         transform: composer.flipped ? "translate(-100%, -50%)" : "translateY(-50%)",
       }}
-      defaultValue=""
+      defaultValue={composer.initialText}
       placeholder={placeholder}
       rows={1}
       onBlur={(event) => commit(event.currentTarget)}
       onKeyDown={(event) => {
-        // Enter commits; Escape abandons the label.
+        // Enter commits; Escape backs out, leaving the label as it was.
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault()
           commit(event.currentTarget)
         } else if (event.key === "Escape") {
           event.preventDefault()
-          onCommit("")
+          onCancel()
         }
 
         // Excalidraw listens on window for single-key tool shortcuts; without
