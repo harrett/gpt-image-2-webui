@@ -123,6 +123,9 @@ const MAX_UPLOADS = 4
 const MAX_FILE_SIZE = 10 * 1024 * 1024
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"])
 const IMAGE_COUNT_OPTIONS = [1, 2, 3, 4]
+// 4K presets stay listed but are temporarily not selectable. UI-only gate: the
+// route's size allow-lists still accept them.
+const LOCKED_SIZE_VALUES = new Set(["3840x2160", "2160x3840"])
 // Counts above this are shown but locked behind a membership tier. UI-only gate:
 // the server still accepts any count, so this is presentation, not enforcement.
 const MAX_UNLOCKED_IMAGE_COUNT = 2
@@ -2399,18 +2402,44 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                   <Select
                     items={sizeOptions}
                     value={sizeMode}
-                    onValueChange={(value) => setSizeMode(getNextSizeMode(value))}
+                    onValueChange={(value) => {
+                      if (LOCKED_SIZE_VALUES.has(String(value))) {
+                        return
+                      }
+
+                      setSizeMode(getNextSizeMode(value))
+                    }}
                   >
                     <SelectTrigger className="studio-control h-11 w-full rounded-md font-mono text-xs">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent align="start">
                       <SelectGroup>
-                        {sizeOptions.map((item) => (
-                          <SelectItem key={item.value} value={item.value} className="font-mono text-xs">
-                            {item.label}
-                          </SelectItem>
-                        ))}
+                        {sizeOptions.map((item) => {
+                          const isLocked = LOCKED_SIZE_VALUES.has(item.value)
+
+                          return (
+                            <SelectItem
+                              key={item.value}
+                              value={item.value}
+                              // aria-disabled rather than disabled: a disabled item gets
+                              // pointer-events-none, which would swallow the hover that
+                              // reveals the hint.
+                              aria-disabled={isLocked || undefined}
+                              className={cn(
+                                "font-mono text-xs",
+                                isLocked && "group/locked-size cursor-not-allowed text-muted-foreground/50"
+                              )}
+                            >
+                              {item.label}
+                              {isLocked && (
+                                <span className="ml-2 hidden font-sans text-[11px] text-muted-foreground group-hover/locked-size:inline">
+                                  {text.sizeLockedHint}
+                                </span>
+                              )}
+                            </SelectItem>
+                          )
+                        })}
                       </SelectGroup>
                     </SelectContent>
                   </Select>
