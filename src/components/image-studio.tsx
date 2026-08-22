@@ -28,6 +28,7 @@ import {
   RefreshCwIcon,
   ScissorsIcon,
   SparklesIcon,
+  Trash2Icon,
   TriangleAlertIcon,
   WandSparklesIcon,
   XIcon,
@@ -79,6 +80,15 @@ import {
   readStoredConnectionPreferences,
   writeStoredConnectionPreferences,
 } from "@/lib/connection-preferences"
+import {
+  clearCanvases,
+  deleteCanvas,
+  estimateUsage,
+  readHistory,
+  requestPersistence,
+  saveCanvas,
+  saveSession,
+} from "@/lib/history-store"
 import { ImageRequestError, isRetryableImageError, type GeneratedImage } from "@/lib/image-request"
 import { getSizeDimensions, normalizeCustomSize } from "@/lib/image-size"
 import { extractPromptSuggestions, normalizeRefusalText } from "@/lib/prompt-suggestion"
@@ -205,10 +215,14 @@ type WorkflowCopy = {
   generatedAsset: string
   generationSkeletonTitle: string
   historyBackToLatest: string
+  historyClear: string
+  historyClearConfirm: string
+  historyCleared: string
   historyLatestBadge: string
   historyPending: string
   historyRestore: string
   historyRestored: string
+  historyStored: string
   historyTitle: string
   historyViewing: string
   lineageTitle: string
@@ -256,10 +270,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "Generated asset",
     generationSkeletonTitle: "Composing candidates",
     historyBackToLatest: "Back to latest",
+    historyClear: "Clear history",
+    historyClearConfirm: "Confirm clear",
+    historyCleared: "Local history cleared.",
     historyLatestBadge: "Latest",
     historyPending: "Generating",
     historyRestore: "Restore these settings",
     historyRestored: "Prompt and settings restored from this canvas.",
+    historyStored: "Stored",
     historyTitle: "Canvas history",
     historyViewing: "Viewing an earlier canvas",
     lineageTitle: "Prompt lineage",
@@ -326,10 +344,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "生成资产",
     generationSkeletonTitle: "正在组织候选图",
     historyBackToLatest: "回到最新",
+    historyClear: "清空历史",
+    historyClearConfirm: "确认清空",
+    historyCleared: "已清空本地历史。",
     historyLatestBadge: "最新",
     historyPending: "生成中",
     historyRestore: "恢复该轮参数",
     historyRestored: "已恢复该画布的提示词与参数。",
+    historyStored: "占用",
     historyTitle: "历史画布",
     historyViewing: "正在查看历史画布",
     lineageTitle: "提示词链路",
@@ -396,10 +418,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "生成資產",
     generationSkeletonTitle: "正在組織候選圖",
     historyBackToLatest: "回到最新",
+    historyClear: "清空歷史",
+    historyClearConfirm: "確認清空",
+    historyCleared: "已清空本機歷史。",
     historyLatestBadge: "最新",
     historyPending: "生成中",
     historyRestore: "還原該輪參數",
     historyRestored: "已還原該畫布的提示詞與參數。",
+    historyStored: "佔用",
     historyTitle: "歷史畫布",
     historyViewing: "正在檢視歷史畫布",
     lineageTitle: "提示詞鏈路",
@@ -466,10 +492,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "生成アセット",
     generationSkeletonTitle: "候補を作成中",
     historyBackToLatest: "最新に戻る",
+    historyClear: "履歴を消去",
+    historyClearConfirm: "消去を確認",
+    historyCleared: "ローカル履歴を消去しました。",
     historyLatestBadge: "最新",
     historyPending: "生成中",
     historyRestore: "この回の設定を復元",
     historyRestored: "このキャンバスのプロンプトと設定を復元しました。",
+    historyStored: "使用量",
     historyTitle: "キャンバス履歴",
     historyViewing: "過去のキャンバスを表示中",
     lineageTitle: "プロンプト履歴",
@@ -536,10 +566,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "생성된 에셋",
     generationSkeletonTitle: "후보 구성 중",
     historyBackToLatest: "최신으로",
+    historyClear: "기록 지우기",
+    historyClearConfirm: "지우기 확인",
+    historyCleared: "로컬 기록을 지웠습니다.",
     historyLatestBadge: "최신",
     historyPending: "생성 중",
     historyRestore: "이 회차 설정 복원",
     historyRestored: "이 캔버스의 프롬프트와 설정을 복원했습니다.",
+    historyStored: "사용량",
     historyTitle: "캔버스 기록",
     historyViewing: "이전 캔버스를 보는 중",
     lineageTitle: "프롬프트 흐름",
@@ -606,10 +640,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "Asset generado",
     generationSkeletonTitle: "Componiendo candidatos",
     historyBackToLatest: "Volver al último",
+    historyClear: "Borrar historial",
+    historyClearConfirm: "Confirmar borrado",
+    historyCleared: "Historial local borrado.",
     historyLatestBadge: "Último",
     historyPending: "Generando",
     historyRestore: "Restaurar estos ajustes",
     historyRestored: "Prompt y ajustes restaurados desde este lienzo.",
+    historyStored: "Almacenado",
     historyTitle: "Historial de lienzos",
     historyViewing: "Viendo un lienzo anterior",
     lineageTitle: "Linaje del prompt",
@@ -676,10 +714,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "Asset généré",
     generationSkeletonTitle: "Composition des candidats",
     historyBackToLatest: "Revenir au dernier",
+    historyClear: "Effacer l'historique",
+    historyClearConfirm: "Confirmer l'effacement",
+    historyCleared: "Historique local effacé.",
     historyLatestBadge: "Dernier",
     historyPending: "Génération",
     historyRestore: "Restaurer ces réglages",
     historyRestored: "Prompt et réglages restaurés depuis ce canevas.",
+    historyStored: "Stocké",
     historyTitle: "Historique des canevas",
     historyViewing: "Consultation d'un canevas précédent",
     lineageTitle: "Historique du prompt",
@@ -746,10 +788,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "Generiertes Asset",
     generationSkeletonTitle: "Kandidaten werden erstellt",
     historyBackToLatest: "Zurück zum neuesten",
+    historyClear: "Verlauf löschen",
+    historyClearConfirm: "Löschen bestätigen",
+    historyCleared: "Lokaler Verlauf gelöscht.",
     historyLatestBadge: "Neuestes",
     historyPending: "Wird erzeugt",
     historyRestore: "Diese Einstellungen wiederherstellen",
     historyRestored: "Prompt und Einstellungen aus dieser Leinwand wiederhergestellt.",
+    historyStored: "Belegt",
     historyTitle: "Leinwand-Verlauf",
     historyViewing: "Frühere Leinwand wird angezeigt",
     lineageTitle: "Prompt-Verlauf",
@@ -816,10 +862,14 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     generatedAsset: "Asset gerado",
     generationSkeletonTitle: "Compondo candidatos",
     historyBackToLatest: "Voltar ao mais recente",
+    historyClear: "Limpar histórico",
+    historyClearConfirm: "Confirmar limpeza",
+    historyCleared: "Histórico local limpo.",
     historyLatestBadge: "Mais recente",
     historyPending: "Gerando",
     historyRestore: "Restaurar estas configurações",
     historyRestored: "Prompt e configurações restaurados desta tela.",
+    historyStored: "Armazenado",
     historyTitle: "Histórico de telas",
     historyViewing: "Visualizando uma tela anterior",
     lineageTitle: "Histórico do prompt",
@@ -1252,6 +1302,10 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const uploadsRef = useRef<UploadPreview[]>([])
   const progressResetTimeoutRef = useRef<number | null>(null)
   const canvasSerialRef = useRef(0)
+  // Canvases already written to IndexedDB, by identity. The reconciler below
+  // diffs against this so a streaming generation writes only what changed.
+  const persistedCanvasesRef = useRef(new Map<string, StudioResponse>())
+  const hasRestoredHistoryRef = useRef(false)
   const referenceDropDepthRef = useRef(0)
   const browserLocale = useSyncExternalStore(
     subscribeToLocalePreferenceChange,
@@ -1280,6 +1334,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const transfer = useTransferProgress()
   const [canvases, setCanvases] = useState<StudioResponse[]>([])
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
+  const [storageUsage, setStorageUsage] = useState<number | null>(null)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [activeSource, setActiveSource] = useState<ActiveSource | null>(null)
@@ -1386,6 +1441,130 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     writeStoredConnectionPreferences({ apiKey })
   }, [apiKey, hasLoadedPreferences, rememberKey])
 
+  // Restore the previous visit: canvases, the iteration source, and reference
+  // uploads. Deferred through a timeout so the first paint is never blocked and
+  // the state writes land outside the effect body.
+  useEffect(() => {
+    let cancelled = false
+
+    const timeoutId = window.setTimeout(async () => {
+      const restored = await readHistory(MAX_HISTORY_CANVASES)
+
+      if (cancelled || !restored) {
+        hasRestoredHistoryRef.current = true
+        return
+      }
+
+      // Seed the reconciler so restored canvases are not written straight back.
+      for (const canvas of restored.canvases) {
+        persistedCanvasesRef.current.set(canvas.id, canvas)
+      }
+
+      if (restored.canvases.length) {
+        canvasSerialRef.current = Math.max(...restored.canvases.map((canvas) => canvas.serial))
+        setCanvases(restored.canvases)
+        setActiveCanvasId(
+          restored.canvases.some((canvas) => canvas.id === restored.session?.activeCanvasId)
+            ? restored.session!.activeCanvasId
+            : restored.canvases[0].id
+        )
+      }
+
+      const session = restored.session
+
+      if (session?.uploads.length) {
+        setUploads(
+          session.uploads.map((upload) => ({
+            file: upload.file,
+            id: upload.id,
+            url: URL.createObjectURL(upload.file),
+          }))
+        )
+      }
+
+      if (session?.activeSource) {
+        setActiveSource({
+          label: session.activeSource.label,
+          promptSnapshot: session.activeSource.promptSnapshot,
+          round: session.activeSource.round,
+          upload: {
+            file: session.activeSource.file,
+            id: session.activeSource.id,
+            url: URL.createObjectURL(session.activeSource.file),
+          },
+        })
+      }
+
+      hasRestoredHistoryRef.current = true
+      setStorageUsage(await estimateUsage())
+    }, 0)
+
+    return () => {
+      cancelled = true
+      window.clearTimeout(timeoutId)
+    }
+  }, [])
+
+  // Mirror canvas state into IndexedDB. Writes only what changed by identity,
+  // deletes what left the list, and revokes object URLs minted at restore time.
+  useEffect(() => {
+    if (!hasRestoredHistoryRef.current) {
+      return
+    }
+
+    const persisted = persistedCanvasesRef.current
+    const liveIds = new Set(canvases.map((canvas) => canvas.id))
+
+    for (const [canvasId, canvas] of persisted) {
+      if (liveIds.has(canvasId)) {
+        continue
+      }
+
+      persisted.delete(canvasId)
+      void deleteCanvas(canvasId)
+
+      for (const image of canvas.images) {
+        if (image.src.startsWith("blob:")) {
+          URL.revokeObjectURL(image.src)
+        }
+      }
+    }
+
+    for (const canvas of canvases) {
+      if (persisted.get(canvas.id) === canvas) {
+        continue
+      }
+
+      persisted.set(canvas.id, canvas)
+      void saveCanvas(canvas).then(async (saved) => {
+        if (saved) {
+          void requestPersistence()
+          setStorageUsage(await estimateUsage())
+        }
+      })
+    }
+  }, [canvases])
+
+  useEffect(() => {
+    if (!hasRestoredHistoryRef.current) {
+      return
+    }
+
+    void saveSession({
+      activeCanvasId,
+      activeSource: activeSource
+        ? {
+            file: activeSource.upload.file,
+            id: activeSource.upload.id,
+            label: activeSource.label,
+            promptSnapshot: activeSource.promptSnapshot,
+            round: activeSource.round,
+          }
+        : null,
+      uploads: uploads.map((upload) => ({ file: upload.file, id: upload.id })),
+    })
+  }, [activeCanvasId, activeSource, uploads])
+
   useEffect(() => {
     uploadsRef.current = uploads
   }, [uploads])
@@ -1431,6 +1610,20 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     // the new canvas is already in the rail, tagged as the latest one.
     setActiveCanvasId((current) => (current === null || current === canvas.id ? canvas.id : current))
   }, [])
+
+  const clearHistory = useCallback(async () => {
+    // The reconciler revokes object URLs and deletes records as canvases leave
+    // state; this only has to empty the store and reset the view.
+    setCanvases([])
+    setActiveCanvasId(null)
+    setViewerIndex(null)
+    setSelectedImageIndex(0)
+
+    await clearCanvases()
+
+    setStorageUsage(await estimateUsage())
+    toast.success(workflow.historyCleared)
+  }, [workflow.historyCleared])
 
   const selectCanvas = useCallback((canvasId: string) => {
     setActiveCanvasId(canvasId)
@@ -2534,7 +2727,9 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
               canvases={canvases}
               isGenerating={isGenerating}
               locale={locale}
+              storageUsage={storageUsage}
               workflow={workflow}
+              onClear={clearHistory}
               onSelect={selectCanvas}
             />
           )}
@@ -3007,21 +3202,35 @@ function GenerationSkeleton({
   )
 }
 
+function formatStorageSize(bytes: number) {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))}KB`
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
 function CanvasHistoryRail({
   activeCanvasId,
   canvases,
   isGenerating,
   locale,
+  storageUsage,
   workflow,
+  onClear,
   onSelect,
 }: {
   activeCanvasId: string | null
   canvases: StudioResponse[]
   isGenerating: boolean
   locale: Locale
+  storageUsage: number | null
   workflow: WorkflowCopy
+  onClear: () => void
   onSelect: (canvasId: string) => void
 }) {
+  const [isConfirmingClear, setIsConfirmingClear] = useState(false)
+
   return (
     <div className="relative border-b bg-background/40 px-5 py-3">
       <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
@@ -3030,6 +3239,32 @@ function CanvasHistoryRail({
         <span className="font-mono text-[10px] tracking-normal">
           {canvases.length}/{MAX_HISTORY_CANVASES}
         </span>
+        {storageUsage !== null && (
+          <span className="font-mono text-[10px] font-normal tracking-normal text-muted-foreground/70">
+            · {workflow.historyStored} {formatStorageSize(storageUsage)}
+          </span>
+        )}
+        {canvases.length > 0 && (
+          <Button
+            type="button"
+            size="xs"
+            variant={isConfirmingClear ? "destructive" : "ghost"}
+            className="ml-auto rounded-md font-sans tracking-normal"
+            onClick={() => {
+              if (!isConfirmingClear) {
+                setIsConfirmingClear(true)
+                return
+              }
+
+              setIsConfirmingClear(false)
+              onClear()
+            }}
+            onBlur={() => setIsConfirmingClear(false)}
+          >
+            <Trash2Icon data-icon="inline-start" />
+            {isConfirmingClear ? workflow.historyClearConfirm : workflow.historyClear}
+          </Button>
+        )}
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1">

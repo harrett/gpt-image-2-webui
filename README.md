@@ -140,6 +140,18 @@ npm run dev:mock
 4. Enter your API key; requests are always forwarded through `/api/images` to the server-configured upstream.
 5. Generate images, select the strongest result, download it, or set it as the source image for the next round.
 
+## Local history
+
+The canvas history survives a page reload. Up to 12 canvases are kept in the browser's IndexedDB (database `imgx.history`), along with the working session: the active source image and any reference uploads. Nothing leaves the machine — there is no server-side or cloud storage of results anywhere in this project.
+
+- Images are stored as `Blob`s rather than base64 strings, so a full 12-canvas history typically costs a few MB of disk.
+- The rail header shows the current usage and a **Clear history** button (click twice to confirm).
+- The oldest canvas is dropped when the cap is reached, and again if the browser reports the quota is full.
+- The app requests persistent storage so the browser is less likely to evict the history under disk pressure.
+- Where storage is unavailable (private or hardened browsing), the studio falls back to memory-only history and keeps working.
+
+The unsubmitted prompt draft is intentionally *not* restored. Each canvas keeps the prompt and parameters it ran with; use **Restore these settings** on a history canvas to bring them back into the form.
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -173,6 +185,7 @@ npm run start
 
 - The API key you enter is sent to `/api/images`, which forwards it to the server-configured upstream — the upstream address itself is never sent to or from the browser.
 - If you enable **Remember on this device**, only the API key is stored, in the current browser's `localStorage`.
+- Generated images and reference uploads are written to this browser's IndexedDB so history survives a reload. They stay on the device and can be removed at any time with **Clear history**.
 - `OPENAI_API_KEY` can stay on the server so team members do not need to enter a shared key repeatedly.
 
 ## Roadmap
