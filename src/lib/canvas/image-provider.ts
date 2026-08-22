@@ -82,7 +82,7 @@ function currentLocale(locale?: Locale) {
   return resolveLocale(document.documentElement.lang)
 }
 
-function mimeTypeForDataUrl(dataUrl: string) {
+export function mimeTypeForDataUrl(dataUrl: string) {
   return /^data:([^;,]+)/.exec(dataUrl)?.[1] || "image/png"
 }
 
@@ -206,7 +206,9 @@ async function requestImage({
   referenceDataUrl,
   model = DEFAULT_CANVAS_MODEL,
   quality = "auto",
-  outputFormat = "png",
+  // Matches the studio default: a revision is downloaded the same way a
+  // generation is, and PNG is what made that download the slowest leg.
+  outputFormat = "webp",
   background = "auto",
   locale,
   onTransfer,

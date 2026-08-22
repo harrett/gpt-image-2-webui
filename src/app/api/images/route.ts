@@ -28,6 +28,12 @@ export const maxDuration = 180
 const INTERNAL_IMAGE_API_BASE_URL = process.env.INTERNAL_IMAGE_API_BASE_URL
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+// Results travel back to the browser inline as base64 inside the JSON body, so
+// the encoded size *is* the download the user waits through. WebP at a sane
+// compression level is several times smaller than the PNG this used to default
+// to, which is the single biggest lever on perceived generation time.
+const DEFAULT_OUTPUT_FORMAT = "webp"
+const DEFAULT_OUTPUT_COMPRESSION = 80
 const GENERATE_SIZE_VALUES = new Set([
   "auto",
   "256x256",
@@ -73,8 +79,36 @@ function getBackground(formData: FormData) {
 }
 
 function getOutputFormat(formData: FormData) {
-  const value = getText(formData, "outputFormat", "png")
-  return value === "jpeg" || value === "webp" || value === "png" ? value : "png"
+  const value = getText(formData, "outputFormat", DEFAULT_OUTPUT_FORMAT)
+  return value === "jpeg" || value === "webp" || value === "png" ? value : DEFAULT_OUTPUT_FORMAT
+}
+
+// WebP and JPEG both default to `output_compression: 100` upstream — i.e. as
+// close to lossless as the container allows, which for photographic content
+// lands within spitting distance of the PNG it replaced. Asking for WebP alone
+// therefore buys much less than it looks like; the compression level is what
+// turns a ~1.7MB image into a ~300-500KB one. PNG ignores the parameter.
+//
+// Set IMAGE_OUTPUT_COMPRESSION to a 0-100 value to tune, or to "off" for
+// upstreams that reject the parameter outright.
+function getOutputCompression(outputFormat: string) {
+  if (outputFormat === "png") {
+    return undefined
+  }
+
+  const configured = process.env.IMAGE_OUTPUT_COMPRESSION?.trim()
+
+  if (configured === "off") {
+    return undefined
+  }
+
+  const parsed = configured ? Number(configured) : DEFAULT_OUTPUT_COMPRESSION
+
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_OUTPUT_COMPRESSION
+  }
+
+  return Math.min(Math.max(Math.round(parsed), 0), 100)
 }
 
 function getGenerateQuality(formData: FormData) {
@@ -209,6 +243,7 @@ export async function POST(request: Request) {
 
     const model = getText(incomingFormData, "model", "gpt-image-2")
     const outputFormat = getOutputFormat(incomingFormData)
+    const outputCompression = getOutputCompression(outputFormat)
     const imageCount = Number(getText(incomingFormData, "imageCount", "1"))
     const background = getBackground(incomingFormData)
     const n = Math.min(Math.max(imageCount, 1), 4)
@@ -259,6 +294,9 @@ export async function POST(request: Request) {
           image: images.length === 1 ? images[0] : images,
           model,
           n,
+          // Omitted entirely for PNG and when disabled: some OpenAI-compatible
+          // providers reject parameters they do not implement.
+          ...(outputCompression === undefined ? {} : { output_compression: outputCompression }),
           output_format: outputFormat,
           prompt,
           quality,
@@ -274,6 +312,7 @@ export async function POST(request: Request) {
           background,
           model,
           n,
+          ...(outputCompression === undefined ? {} : { output_compression: outputCompression }),
           output_format: outputFormat,
           prompt,
           quality,

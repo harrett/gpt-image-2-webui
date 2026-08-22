@@ -31,7 +31,12 @@ import { Textarea } from "@/components/ui/textarea"
 import { TransferTimeline } from "@/components/transfer-timeline"
 import { useTransferProgress } from "@/hooks/use-transfer-progress"
 import { showLastReference } from "@/lib/canvas/debug-reference"
-import { editImage, ensureDataUrl, measureDataUrl } from "@/lib/canvas/image-provider"
+import {
+  editImage,
+  ensureDataUrl,
+  measureDataUrl,
+  mimeTypeForDataUrl,
+} from "@/lib/canvas/image-provider"
 import {
   ANNOTATION_COLOR,
   AnnotationComposer,
@@ -134,7 +139,9 @@ async function loadInitialScene(src: string) {
     files: {
       [fileId]: {
         id: fileId,
-        mimeType: "image/png",
+        // Read off the data URL rather than assumed: results are WebP by
+        // default now, and a wrong mime type here misfiles the asset.
+        mimeType: mimeTypeForDataUrl(dataUrl) as BinaryFileData["mimeType"],
         dataURL: dataUrl as DataURL,
         created: Date.now(),
       } satisfies BinaryFileData,
@@ -237,7 +244,7 @@ export function CanvasEditor({
             dataUrl: scene.dataUrl,
             width: scene.width,
             height: scene.height,
-            mimeType: "image/png",
+            mimeType: mimeTypeForDataUrl(scene.dataUrl),
             prompt: source.prompt,
           },
         ])
@@ -346,7 +353,7 @@ export function CanvasEditor({
       api.addFiles([
         {
           id: fileId,
-          mimeType: "image/png",
+          mimeType: result.mimeType as BinaryFileData["mimeType"],
           dataURL: result.dataUrl as DataURL,
           created: Date.now(),
         } satisfies BinaryFileData,

@@ -1325,7 +1325,12 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [sizeMode, setSizeMode] = useState<SizeSelectValue>(DEFAULT_SIZE)
   const [customSize, setCustomSize] = useState(DEFAULT_CUSTOM_SIZE)
   const [quality, setQuality] = useState("auto")
-  const [outputFormat, setOutputFormat] = useState("png")
+  // WebP, not PNG: results come back inline as base64 in the JSON body, so the
+  // encoded size is exactly the download the user sits through. PNG of a
+  // photographic 1024px result runs ~1.7MB (~2.3MB once base64'd); the same
+  // image as WebP is several times smaller. Users who need lossless output can
+  // still pick PNG in the format control.
+  const [outputFormat, setOutputFormat] = useState("webp")
   const [background, setBackground] = useState("auto")
   const [imageCount, setImageCount] = useState(1)
   const [lockedCountHint, setLockedCountHint] = useState<number | null>(null)
