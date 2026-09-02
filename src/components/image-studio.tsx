@@ -193,6 +193,8 @@ const PRESET_SIZE_VALUES = [
   "1024x1024",
   "1536x1024",
   "1024x1536",
+  "1920x1080",
+  "1080x1920",
   "2048x2048",
   "2048x1152",
   "3840x2160",
@@ -1202,6 +1204,8 @@ function getSizeOptions(locale: Locale) {
     { value: "1024x1024" as const, label: `1024 x 1024 · ${t(locale, "aspectSquare")}` },
     { value: "1536x1024" as const, label: `1536 x 1024 · ${t(locale, "aspectLandscape")} 3:2` },
     { value: "1024x1536" as const, label: `1024 x 1536 · ${t(locale, "aspectPortrait")} 2:3` },
+    { value: "1920x1080" as const, label: `1920 x 1080 · ${t(locale, "aspectLandscape")} 16:9` },
+    { value: "1080x1920" as const, label: `1080 x 1920 · ${t(locale, "aspectPortrait")} 9:16` },
     { value: "2048x2048" as const, label: `2048 x 2048 · 2K ${t(locale, "aspectSquare")}` },
     { value: "2048x1152" as const, label: `2048 x 1152 · 2K ${t(locale, "aspectLandscape")}` },
     { value: "3840x2160" as const, label: `3840 x 2160 · 4K ${t(locale, "aspectLandscape")}` },
@@ -1219,11 +1223,11 @@ function getSizePreviewClass(size: string) {
     return "aspect-[3/2]"
   }
 
-  if (size === "2048x1152" || size === "3840x2160") {
+  if (size === "2048x1152" || size === "3840x2160" || size === "1920x1080") {
     return "aspect-video"
   }
 
-  if (size === "2160x3840") {
+  if (size === "2160x3840" || size === "1080x1920") {
     return "aspect-[9/16]"
   }
 
