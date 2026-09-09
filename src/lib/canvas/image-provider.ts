@@ -22,7 +22,7 @@ import {
   type TransferTracker,
 } from "@/lib/transfer-progress"
 
-export const DEFAULT_CANVAS_MODEL = "gpt-image-2"
+export const DEFAULT_CANVAS_MODEL = "gpt-image-2.5-flare"
 
 // Mirrors MAX_IMAGE_BYTES in src/app/api/images/route.ts — the hard server-side
 // reject. The soft budget below is what we actually aim for.

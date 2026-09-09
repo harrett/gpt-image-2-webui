@@ -245,7 +245,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const model = getText(incomingFormData, "model", "gpt-image-2")
+    const model = getText(incomingFormData, "model", "gpt-image-2.5-flare")
     const outputFormat = getOutputFormat(incomingFormData)
     const outputCompression = getOutputCompression(outputFormat)
     const imageCount = Number(getText(incomingFormData, "imageCount", "1"))

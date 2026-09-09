@@ -1011,11 +1011,24 @@ const remixRecipeItems: {
   { count: 2, icon: ScissorsIcon, id: "inpaint" },
 ]
 
+// `value` is the model id sent upstream; `label` is what the UI shows. They
+// differ on purpose — the 2.5 variant ships as "gpt-image-2.5-flare" but is
+// presented as plain "gpt-image-2.5".
 const modelItems = [
+  { label: "gpt-image-2.5", value: "gpt-image-2.5-flare" },
   { label: "gpt-image-2", value: "gpt-image-2" },
   // { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
   // { label: "gpt-image-1", value: "gpt-image-1" },
 ]
+
+const DEFAULT_MODEL = "gpt-image-2.5-flare"
+const MODEL_LABEL_BY_VALUE = new Map(modelItems.map((item) => [item.value, item.label]))
+
+// Falls back to the raw id so a result generated with a model no longer in the
+// picker still renders something meaningful.
+function getModelLabel(value: string) {
+  return MODEL_LABEL_BY_VALUE.get(value) ?? value
+}
 
 type PresetSizeValue = (typeof PRESET_SIZE_VALUES)[number]
 type SizeValue = PresetSizeValue | (string & {})
@@ -1326,7 +1339,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [hasLoadedPreferences, setHasLoadedPreferences] = useState(false)
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
   const [selectedPromptPresetIndex, setSelectedPromptPresetIndex] = useState(0)
-  const [model, setModel] = useState("gpt-image-2")
+  const [model, setModel] = useState(DEFAULT_MODEL)
   const [uploads, setUploads] = useState<UploadPreview[]>([])
   const [isReferenceDropActive, setIsReferenceDropActive] = useState(false)
   const [sizeMode, setSizeMode] = useState<SizeSelectValue>(DEFAULT_SIZE)
@@ -2220,7 +2233,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 font-mono text-[11px] text-muted-foreground shadow-sm md:flex">
-              <span className="font-medium text-foreground">{model}</span>
+              <span className="font-medium text-foreground">{getModelLabel(model)}</span>
               <span className="text-border">·</span>
               <span>{size}</span>
               <span className="text-border">·</span>
@@ -2613,7 +2626,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                   <Select
                     items={modelItems}
                     value={model}
-                    onValueChange={(value) => setModel(selectValue(value, "gpt-image-2"))}
+                    onValueChange={(value) => setModel(selectValue(value, DEFAULT_MODEL))}
                   >
                     <SelectTrigger className="studio-control w-full rounded-md">
                       <SelectValue />
@@ -2989,7 +3002,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
             <div className="relative border-t bg-background/70 px-5 py-4 backdrop-blur">
               <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
                 {[
-                  [text.summaryModel, result.model],
+                  [text.summaryModel, getModelLabel(result.model)],
                   [text.summarySize, result.size],
                   [text.summaryQuality, qualityLabelByValue[result.quality] || result.quality],
                   [text.summaryFormat, result.outputFormat.toUpperCase()],
@@ -3169,7 +3182,7 @@ function EmptyCanvas({
         </div>
         <div className="hidden items-center gap-2 sm:flex">
           <Badge variant="secondary" className="rounded-md font-mono text-[11px]">
-            {model}
+            {getModelLabel(model)}
           </Badge>
           <Badge variant="outline" className="rounded-md bg-muted/30 font-mono text-[11px]">
             {size} · {outputFormat.toUpperCase()} · x{imageCount}
