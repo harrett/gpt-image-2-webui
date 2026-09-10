@@ -8,7 +8,8 @@
     "dev:mock": "IMAGE_API_MOCK=1 next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "proxy:upstream": "node tools/upstream-path-proxy/server.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

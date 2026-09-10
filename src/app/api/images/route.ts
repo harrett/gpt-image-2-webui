@@ -115,6 +115,19 @@ function getOutputCompression(outputFormat: string) {
   return Math.min(Math.max(Math.round(parsed), 0), 100)
 }
 
+// Relay gateways commonly answer with a hosted image URL rather than base64.
+// That URL would be handed straight to the browser, which leaks the upstream
+// address this route deliberately hides, makes the browser fetch a third-party
+// host (CORS, hotlink protection), and leaves the transfer progress bar
+// measuring an almost-empty response body while the real download happens in an
+// <img> tag we cannot observe. Asking upstream for base64 solves all three.
+//
+// OpenAI's own endpoint rejects the parameter for GPT image models ("always
+// return base64-encoded images"), so this stays opt-in per deployment.
+function shouldRequestB64Json() {
+  return process.env.IMAGE_REQUEST_B64_JSON === "1"
+}
+
 function getGenerateQuality(formData: FormData) {
   const value = getText(formData, "quality", "auto")
   return value === "auto" || value === "low" || value === "medium" || value === "high" || value === "standard" || value === "hd"
@@ -304,6 +317,7 @@ export async function POST(request: Request) {
           output_format: outputFormat,
           prompt,
           quality,
+          ...(shouldRequestB64Json() ? { response_format: "b64_json" as const } : {}),
           size: size as OpenAI.Images.ImageEditParams["size"],
         })
       } else {
@@ -320,6 +334,7 @@ export async function POST(request: Request) {
           output_format: outputFormat,
           prompt,
           quality,
+          ...(shouldRequestB64Json() ? { response_format: "b64_json" as const } : {}),
           size: size as OpenAI.Images.ImageGenerateParams["size"],
         })
       }
