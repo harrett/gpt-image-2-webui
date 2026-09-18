@@ -1009,16 +1009,16 @@ const remixRecipeItems: {
 ]
 
 // `value` is the model id sent upstream; `label` is what the UI shows. They
-// differ on purpose — the 2.5 variant ships as "gpt-image-2.5-flare" but is
+// differ on purpose — the 2.5 variant ships as "gpt-image-2.5-sunburst" but is
 // presented as plain "gpt-image-2.5".
 const modelItems = [
-  { label: "gpt-image-2.5", value: "gpt-image-2.5-flare" },
+  { label: "gpt-image-2.5", value: "gpt-image-2.5-sunburst" },
   { label: "gpt-image-2", value: "gpt-image-2" },
   // { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
   // { label: "gpt-image-1", value: "gpt-image-1" },
 ]
 
-const DEFAULT_MODEL = "gpt-image-2.5-flare"
+const DEFAULT_MODEL = "gpt-image-2.5-sunburst"
 const MODEL_LABEL_BY_VALUE = new Map(modelItems.map((item) => [item.value, item.label]))
 
 // Falls back to the raw id so a result generated with a model no longer in the
