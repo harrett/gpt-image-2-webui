@@ -89,6 +89,13 @@ import {
   saveCanvas,
   saveSession,
 } from "@/lib/history-store"
+import { measureDataUrl } from "@/lib/canvas/image-provider"
+import {
+  DEFAULT_MODEL,
+  getSupportedQualities,
+  getSupportedSizes,
+  getModelCapabilities,
+} from "@/lib/image-model-capabilities"
 import { ImageRequestError, isRetryableImageError, type GeneratedImage } from "@/lib/image-request"
 import { getSizeDimensions, normalizeCustomSize } from "@/lib/image-size"
 import { extractPromptSuggestions, normalizeRefusalText } from "@/lib/prompt-suggestion"
@@ -179,7 +186,11 @@ const optionGroupClassName = "studio-option-group"
 const optionItemClassName = "studio-option-item h-8 text-xs hover:bg-muted"
 const CUSTOM_SIZE_OPTION_VALUE = "custom"
 // Canvases hold base64 image payloads, so this cap is a memory budget as much as
-// a UI one: ~4 images per canvas at up to ~550KB each for 4K renders.
+// a UI one: ~4 images per canvas at up to ~550KB each for 4K renders — *when the
+// model honours the requested WebP output*. A channel that ignores it and hands
+// back raw PNG costs ~23MB per image instead, roughly forty times the budget
+// this number was picked against. saveCanvas degrades by evicting the oldest
+// canvas on quota failure rather than by losing the new one.
 const MAX_HISTORY_CANVASES = 24
 const RISK_NOTICE_ACKNOWLEDGED_UNTIL_KEY = "imgx.risk-notice-acknowledged-until"
 const RISK_NOTICE_SUPPRESSION_MS = 7 * 24 * 60 * 60 * 1000
@@ -1008,17 +1019,18 @@ const remixRecipeItems: {
   { count: 2, icon: ScissorsIcon, id: "inpaint" },
 ]
 
-// `value` is the model id sent upstream; `label` is what the UI shows. They
-// differ on purpose — the 2.5 variant ships as "gpt-image-2.5-sunburst" but is
-// presented as plain "gpt-image-2.5".
+// `value` is the id sent to /api/images and on to the gateway, which redirects
+// it to whatever the configured channel calls the model upstream. That upstream
+// name is deliberately not repeated here: it carries per-image pricing in its
+// text and changes whenever the channel is repriced. `label` stays free to
+// differ from `value` for the same reason.
 const modelItems = [
-  { label: "gpt-image-2.5", value: "gpt-image-2.5-sunburst" },
+  { label: "gpt-image-2.5", value: DEFAULT_MODEL },
   { label: "gpt-image-2", value: "gpt-image-2" },
   // { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
   // { label: "gpt-image-1", value: "gpt-image-1" },
 ]
 
-const DEFAULT_MODEL = "gpt-image-2.5-sunburst"
 const MODEL_LABEL_BY_VALUE = new Map(modelItems.map((item) => [item.value, item.label]))
 
 // Falls back to the raw id so a result generated with a model no longer in the
@@ -1208,7 +1220,23 @@ async function createGeneratedUploadPreview({
   }
 }
 
-function getSizeOptions(locale: Locale) {
+// Filtered against the model's capability table so the picker can never offer a
+// size the route would silently coerce to 1024x1024. Custom survives alongside
+// the presets — it is validated by range, not by list — but not on a model that
+// ignores size altogether, where an empty result hides the control entirely.
+function getSizeOptions(locale: Locale, model: string, isEdit: boolean) {
+  const supported = getSupportedSizes(model, isEdit)
+
+  if (!supported.length) {
+    return []
+  }
+
+  return getAllSizeOptions(locale).filter(
+    (item) => item.value === CUSTOM_SIZE_OPTION_VALUE || supported.includes(item.value)
+  )
+}
+
+function getAllSizeOptions(locale: Locale) {
   return [
     { value: "auto" as const, label: `${t(locale, "aspectSmart")} (auto)` },
     { value: "1024x1024" as const, label: `1024 x 1024 · ${t(locale, "aspectSquare")}` },
@@ -1220,7 +1248,7 @@ function getSizeOptions(locale: Locale) {
     { value: "2048x1152" as const, label: `2048 x 1152 · 2K ${t(locale, "aspectLandscape")}` },
     { value: "3840x2160" as const, label: `3840 x 2160 · 4K ${t(locale, "aspectLandscape")}` },
     { value: "2160x3840" as const, label: `2160 x 3840 · 4K ${t(locale, "aspectPortrait")}` },
-    { value: CUSTOM_SIZE_OPTION_VALUE, label: `${t(locale, "aspectCustom")} · ${DEFAULT_CUSTOM_SIZE}` },
+    { value: CUSTOM_SIZE_OPTION_VALUE as typeof CUSTOM_SIZE_OPTION_VALUE, label: `${t(locale, "aspectCustom")} · ${DEFAULT_CUSTOM_SIZE}` },
   ]
 }
 
@@ -1254,29 +1282,45 @@ function getSizePreviewStyle(size: string): CSSProperties | undefined {
   return { aspectRatio: `${dimensions.width} / ${dimensions.height}` }
 }
 
-function getQualityItems(locale: Locale) {
+function getQualityItems(locale: Locale, model: string, isEdit: boolean) {
+  const supported = getSupportedQualities(model, isEdit)
+
   return [
     { label: t(locale, "qualityAuto"), value: "auto" },
     { label: t(locale, "qualityLow"), value: "low" },
     { label: t(locale, "qualityMedium"), value: "medium" },
     { label: t(locale, "qualityHigh"), value: "high" },
-  ]
+  ].filter((item) => supported.includes(item.value))
 }
 
-function getFormatItems() {
+function getFormatItems(model: string) {
+  const supported = getModelCapabilities(model).outputFormats
+
   return [
     { label: "PNG", value: "png" },
     { label: "JPEG", value: "jpeg" },
     { label: "WEBP", value: "webp" },
-  ]
+  ].filter((item) => supported.includes(item.value))
 }
 
-function getBackgroundItems(locale: Locale) {
+// Keeps a selection the current model no longer offers from reaching the
+// request: the first remaining option stands in until the user picks again.
+function pickSupportedValue(items: { value: string }[], selected: string, fallback: string) {
+  if (!items.length) {
+    return fallback
+  }
+
+  return items.some((item) => item.value === selected) ? selected : items[0].value
+}
+
+function getBackgroundItems(locale: Locale, model: string) {
+  const supported = getModelCapabilities(model).backgrounds
+
   return [
     { label: t(locale, "backgroundAuto"), value: "auto" },
     { label: t(locale, "backgroundOpaque"), value: "opaque" },
     // { label: t(locale, "backgroundTransparent"), value: "transparent" },
-  ]
+  ].filter((item) => supported.includes(item.value))
 }
 
 function readCookieValue(name: string) {
@@ -1339,16 +1383,20 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const [model, setModel] = useState(DEFAULT_MODEL)
   const [uploads, setUploads] = useState<UploadPreview[]>([])
   const [isReferenceDropActive, setIsReferenceDropActive] = useState(false)
-  const [sizeMode, setSizeMode] = useState<SizeSelectValue>(DEFAULT_SIZE)
+  // These four hold what the user *picked*; the values actually used are
+  // derived below against the model's capability table, because switching model
+  // can retire a selection and writing the correction back into state would
+  // fight the next click.
+  const [sizeSelection, setSizeMode] = useState<SizeSelectValue>(DEFAULT_SIZE)
   const [customSize, setCustomSize] = useState(DEFAULT_CUSTOM_SIZE)
-  const [quality, setQuality] = useState("auto")
+  const [qualitySelection, setQuality] = useState("auto")
   // WebP, not PNG: results come back inline as base64 in the JSON body, so the
   // encoded size is exactly the download the user sits through. PNG of a
   // photographic 1024px result runs ~1.7MB (~2.3MB once base64'd); the same
   // image as WebP is several times smaller. Users who need lossless output can
   // still pick PNG in the format control.
-  const [outputFormat, setOutputFormat] = useState("webp")
-  const [background, setBackground] = useState("auto")
+  const [outputFormatSelection, setOutputFormat] = useState("webp")
+  const [backgroundSelection, setBackground] = useState("auto")
   const [imageCount, setImageCount] = useState(1)
   const [lockedCountHint, setLockedCountHint] = useState<number | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -1372,27 +1420,71 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const selectedLocale = LOCALE_OPTIONS.find((item) => item.value === locale) || LOCALE_OPTIONS[0]
   const promptPresets = useMemo(() => studioPromptPresets[locale], [locale])
   const prompt = customPrompt ?? promptPresets[selectedPromptPresetIndex] ?? promptPresets[0]
-  const sizeOptions = useMemo(() => getSizeOptions(locale), [locale])
+  // Reference images route the request to the edit endpoint, which accepts a
+  // different set of sizes and qualities than generation does.
+  const isEditRequest = Boolean(activeSource) || uploads.length > 0
+  const sizeOptions = useMemo(
+    () => getSizeOptions(locale, model, isEditRequest),
+    [isEditRequest, locale, model]
+  )
+  const qualityItems = useMemo(
+    () => getQualityItems(locale, model, isEditRequest),
+    [isEditRequest, locale, model]
+  )
+  const formatItems = useMemo(() => getFormatItems(model), [model])
+  const backgroundItems = useMemo(() => getBackgroundItems(locale, model), [locale, model])
+  // With no options at all the model decides the size on its own; the value
+  // kept here is inert, and the route drops it rather than sending it upstream.
+  const sizeMode: SizeSelectValue = sizeOptions.some((item) => item.value === sizeSelection)
+    ? sizeSelection
+    : sizeOptions[0]?.value ?? DEFAULT_SIZE
+  const quality = useMemo(
+    () => pickSupportedValue(qualityItems, qualitySelection, "auto"),
+    [qualityItems, qualitySelection]
+  )
+  const outputFormat = useMemo(
+    () => pickSupportedValue(formatItems, outputFormatSelection, "webp"),
+    [formatItems, outputFormatSelection]
+  )
+  const background = useMemo(
+    () => pickSupportedValue(backgroundItems, backgroundSelection, "auto"),
+    [backgroundItems, backgroundSelection]
+  )
+  // quality / format / background share a row, and a model may honour none,
+  // some or all of them — the row has to narrow rather than leave holes.
+  const outputControlColumns = [qualityItems, formatItems, backgroundItems].filter(
+    (items) => items.length > 0
+  ).length
+  const outputControlGridClassName =
+    outputControlColumns === 1
+      ? "grid-cols-1"
+      : outputControlColumns === 2
+        ? "grid-cols-2"
+        : "grid-cols-3"
   const customSizeValue = useMemo(() => normalizeCustomSize(customSize), [customSize])
   const isCustomSize = sizeMode === CUSTOM_SIZE_OPTION_VALUE
   const size: SizeValue = isCustomSize ? customSizeValue || customSize.trim() : sizeMode
-  const qualityItems = useMemo(() => getQualityItems(locale), [locale])
-  const formatItems = useMemo(() => getFormatItems(), [])
-  const backgroundItems = useMemo(() => getBackgroundItems(locale), [locale])
+  // Only quote back what the user actually chose. On a model that picks its own
+  // size and container, a chip reading "1024x1024 · WEBP" before the request is
+  // a guess, and the result routinely contradicts it.
+  const requestSizeLabel = sizeOptions.length ? size : ""
+  const requestFormatLabel = formatItems.length ? outputFormat.toUpperCase() : ""
   const qualityLabelByValue = useMemo(
     () => Object.fromEntries(qualityItems.map((item) => [item.value, item.label])),
     [qualityItems]
   )
 
+  // Empty on a model that picks its own size: the control this labels is not
+  // rendered at all then, so the label is unused rather than wrong.
   const selectedSizeOption = useMemo(
-    () => sizeOptions.find((item) => item.value === sizeMode) || sizeOptions[1],
+    () => sizeOptions.find((item) => item.value === sizeMode) ?? sizeOptions[1] ?? sizeOptions[0],
     [sizeOptions, sizeMode]
   )
   const selectedSizeLabel = isCustomSize
     ? customSizeValue
       ? `${customSizeValue} · ${text.aspectCustom}`
       : text.customAspectDescription
-    : selectedSizeOption.label
+    : selectedSizeOption?.label ?? ""
   const result = useMemo(
     () => canvases.find((canvas) => canvas.id === activeCanvasId) || null,
     [activeCanvasId, canvases]
@@ -1988,13 +2080,23 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   async function callProxy(
     requestedCount: number,
     tracker?: TransferTracker
-  ): Promise<{ images: GeneratedImage[]; mock: boolean }> {
+  ): Promise<{
+    images: GeneratedImage[]
+    mock: boolean
+    outputFormat?: string
+    size?: string
+  }> {
     const formData = new FormData()
     const requestPrompt = buildRequestPrompt(prompt, activeSource)
 
     formData.append("apiKey", apiKey.trim())
     formData.append("background", background)
     formData.append("imageCount", String(requestedCount))
+    // Channels that answer with a hosted URL exist, and this one does. Ask the
+    // route to fetch those bytes server-side: the browser never learns the
+    // upstream host, the result survives the link expiring, and the transfer
+    // bar measures the real download instead of an almost-empty body.
+    formData.append("inlineRemoteImages", "1")
     formData.append("locale", locale)
     formData.append("model", model)
     formData.append("outputFormat", outputFormat)
@@ -2027,6 +2129,11 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       error?: string
       images?: GeneratedImage[]
       mock?: boolean
+      // Absent when the model gave no say over it; present and authoritative
+      // otherwise — on a model that ignores output_format these describe the
+      // bytes that came back, not what was asked for.
+      outputFormat?: string
+      size?: string
     }
 
     try {
@@ -2054,6 +2161,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     return {
       images: payload.images,
       mock: payload.mock === true,
+      outputFormat: payload.outputFormat,
+      size: payload.size,
     }
   }
 
@@ -2099,6 +2208,11 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       const maxAttempts = total + 2
       let attempts = 0
       let servedByMock = false
+      // What the route says actually came back. On a model that honours the
+      // request these match what was asked for; on one that ignores it they are
+      // the only truthful thing to put on the badge.
+      let servedOutputFormat: string | undefined
+      let servedSize: string | undefined
 
       const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
         background,
@@ -2108,12 +2222,12 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
         images: visibleImages,
         isMock: servedByMock,
         model,
-        outputFormat,
+        outputFormat: servedOutputFormat ?? outputFormat,
         prompt: prompt.trim(),
         quality,
         requestedCount: total,
         serial,
-        size,
+        size: servedSize ?? size,
         sourceLabel: activeSource?.label,
       })
 
@@ -2135,6 +2249,21 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           const topUp = await callProxy(1, tracker)
 
           servedByMock = servedByMock || topUp.mock
+          servedOutputFormat = topUp.outputFormat ?? servedOutputFormat
+          servedSize = topUp.size ?? servedSize
+
+          // No size came back because the model chose it itself. The pixels are
+          // in hand either way, so read the answer off them rather than leave
+          // the badge and the canvas preview quoting a size nobody honoured.
+          if (!servedSize && topUp.images[0]?.src.startsWith("data:")) {
+            try {
+              const measured = await measureDataUrl(topUp.images[0].src)
+
+              servedSize = `${measured.width}x${measured.height}`
+            } catch {
+              // Decoding is a nicety; a result without a size beats no result.
+            }
+          }
 
           if (images.length < total) {
             images.push(...topUp.images.slice(0, total - images.length))
@@ -2231,10 +2360,18 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="hidden items-center gap-2 rounded-md border bg-muted/40 px-3 py-2 font-mono text-[11px] text-muted-foreground shadow-sm md:flex">
               <span className="font-medium text-foreground">{getModelLabel(model)}</span>
-              <span className="text-border">·</span>
-              <span>{size}</span>
-              <span className="text-border">·</span>
-              <span>{outputFormat.toUpperCase()}</span>
+              {requestSizeLabel && (
+                <>
+                  <span className="text-border">·</span>
+                  <span>{requestSizeLabel}</span>
+                </>
+              )}
+              {requestFormatLabel && (
+                <>
+                  <span className="text-border">·</span>
+                  <span>{requestFormatLabel}</span>
+                </>
+              )}
               <span className="text-border">·</span>
               <span className="font-medium text-foreground">×{imageCount}</span>
             </div>
@@ -2409,6 +2546,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
             <Section index="02" title={text.sectionOutputTitle} hint={text.sectionOutputHint}>
               <FieldGroup>
+                {sizeOptions.length > 0 && (
                 <Field data-invalid={isCustomSize && !customSizeValue ? true : undefined}>
                   <FieldLabel className="text-xs font-semibold text-muted-foreground">
                     {text.aspect}
@@ -2446,8 +2584,11 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                     {selectedSizeLabel}
                   </FieldDescription>
                 </Field>
+                )}
 
-                <div className="grid grid-cols-3 gap-2">
+                {outputControlColumns > 0 && (
+                <div className={cn("grid gap-2", outputControlGridClassName)}>
+                  {qualityItems.length > 0 && (
                   <Field>
                     <FieldLabel className="text-xs font-semibold text-muted-foreground">
                       {text.quality}
@@ -2471,6 +2612,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                       </SelectContent>
                     </Select>
                   </Field>
+                  )}
+                  {formatItems.length > 0 && (
                   <Field>
                     <FieldLabel className="text-xs font-semibold text-muted-foreground">
                       {text.format}
@@ -2494,6 +2637,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                       </SelectContent>
                     </Select>
                   </Field>
+                  )}
+                  {backgroundItems.length > 0 && (
                   <Field>
                     <FieldLabel className="text-xs font-semibold text-muted-foreground">
                       {text.background}
@@ -2517,7 +2662,9 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                       </SelectContent>
                     </Select>
                   </Field>
+                  )}
                 </div>
+                )}
 
                 <Field>
                   <div className="flex items-center justify-between">
@@ -2962,8 +3109,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                 imageCount={imageCount}
                 isCjk={isCjk}
                 model={model}
-                outputFormat={outputFormat}
-                size={size}
+                outputFormat={requestFormatLabel}
+                size={requestSizeLabel}
                 text={text}
               />
             )}
@@ -3156,7 +3303,7 @@ function EmptyCanvas({
             {getModelLabel(model)}
           </Badge>
           <Badge variant="outline" className="rounded-md bg-muted/30 font-mono text-[11px]">
-            {size} · {outputFormat.toUpperCase()} · x{imageCount}
+            {[size, outputFormat, `x${imageCount}`].filter(Boolean).join(" · ")}
           </Badge>
         </div>
       </div>

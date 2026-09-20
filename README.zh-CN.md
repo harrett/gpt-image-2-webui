@@ -106,6 +106,33 @@ npm run dev
 
 打开 [http://localhost:3000](http://localhost:3000) 即可使用。
 
+### Image2Pro 渠道
+
+页面上的生图 **不会** 直连 image2pro：浏览器只请求 `/api/images`，由服务端转发到 `INTERNAL_IMAGE_API_BASE_URL` 指向的网关（默认 `http://127.0.0.1:8080`）。渠道账号、密钥与模型重定向都在网关后台配置，页面里填的是网关 Key。
+
+因此接入一个新渠道通常不需要改前端：在网关侧把 picker 发出的模型 ID（`gpt-image-2.5`、`gpt-image-2`）重定向到渠道自己的模型名即可。
+
+各模型实际**认账**的参数记录在 `src/lib/image-model-capabilities.ts`：列表为空表示该模型不给用户选择权，客户端隐藏对应控件、服务端省略对应字段。这里记的是实测结果而非文档承诺——image2pro 对 `size` / `output_format` / `output_compression` / `response_format` 一律返回 200 然后**静默忽略**，固定产出 2880×2880 PNG（约 17MB）并以 URL 形式返回。因此：
+
+- 该渠道下 aspect / quality / format / bg 四个控件不显示，结果徽标上的尺寸由前端实测像素得出；
+- 结果由服务端下载后以 base64 内联回传（`inlineRemoteImages`），单张约 23MB，历史记录配额相应吃紧；
+- 单次生成耗时实测 41–55s，偶发 503（Cloudflare 1102），路由 `maxDuration` 为 180s。
+
+### 使用 Image2Pro 命令行生图
+
+项目也包含一个独立脚本，直连 `https://api.image2pro.top/v1` 的 OpenAI 兼容图片接口，**不经过网关**，只供本地调试使用。请把密钥放在环境变量中，不要写进脚本或提交到 Git：
+
+```bash
+export IMAGE2PRO_API_KEY='sk-你的密钥'
+npm run image2pro -- --prompt "一间被晨光照亮的安静书店" --model "GPT-Image-2" --size 1024x1024
+```
+
+图片会保存到 `generated/`。脚本还支持 `--count 1-4`、`--quality`、`--background`、`--format png|jpeg|webp` 和 `--output-dir`；先查看账户可用模型可运行：
+
+```bash
+npm run image2pro -- --list-models
+```
+
 ## 使用方式
 
 1. 在 Prompt 区域输入创意描述，或点击内置预设。

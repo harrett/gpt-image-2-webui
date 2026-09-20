@@ -6,6 +6,8 @@
     "dev": "next dev --webpack",
     "dev:turbo": "next dev --turbopack",
     "dev:mock": "IMAGE_API_MOCK=1 next dev --webpack",
+    "image2pro": "node scripts/image2pro-generate.mjs",
+    "image2pro:probe": "node scripts/image2pro-probe.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

@@ -42,3 +42,6 @@ yarn-error.log*
 next-env.d.ts
 /docs/
 /temp.txt
+
+# CLI/probe output images
+/generated/

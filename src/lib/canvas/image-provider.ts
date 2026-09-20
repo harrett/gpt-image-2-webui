@@ -14,6 +14,7 @@
 import { inspectReference } from "@/lib/canvas/debug-reference"
 import { getStoredApiKey } from "@/lib/connection-preferences"
 import { DEFAULT_LOCALE, resolveLocale, t, type Locale } from "@/lib/i18n"
+import { DEFAULT_MODEL } from "@/lib/image-model-capabilities"
 import type { GeneratedImage } from "@/lib/image-request"
 import { sizeForCanvasBox } from "@/lib/image-size"
 import {
@@ -22,9 +23,12 @@ import {
   type TransferTracker,
 } from "@/lib/transfer-progress"
 
-export const DEFAULT_CANVAS_MODEL = "gpt-image-2.5-flare"
+// Revisions normally re-send the model their source canvas was generated with;
+// this only covers a request that arrives without one. It has to be a model the
+// gateway actually routes, or the revision 404s where the original succeeded.
+export const DEFAULT_CANVAS_MODEL = DEFAULT_MODEL
 
-// Mirrors MAX_IMAGE_BYTES in src/app/api/images/route.ts — the hard server-side
+// Mirrors MAX_UPLOAD_BYTES in src/app/api/images/route.ts — the hard server-side
 // reject. The soft budget below is what we actually aim for.
 const MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 // Upload is the slowest leg of a revision: it runs on the user's *upstream*

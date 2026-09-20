@@ -10,6 +10,12 @@ import {
   scrubUpstreamDetails,
   type GeneratedImage,
 } from "@/lib/image-request"
+import {
+  DEFAULT_MODEL,
+  getModelCapabilities,
+  getSupportedQualities,
+  getSupportedSizes,
+} from "@/lib/image-model-capabilities"
 import { normalizeCustomSize } from "@/lib/image-size"
 import { PAYLOAD_BYTES_HEADER } from "@/lib/transfer-progress"
 import {
@@ -19,7 +25,11 @@ import {
 } from "@/lib/mock-image"
 
 export const runtime = "nodejs"
-export const maxDuration = 180
+// Measured on the configured channel: 41-61s for a successful generation, plus
+// one observed case that had not answered after 300s. A 180s ceiling would kill
+// the request *after* the upstream generated and billed the image, so this sits
+// at the platform maximum rather than at a number that looks tidy.
+export const maxDuration = 300
 
 // Security: upstream base URL is server-controlled and read from a
 // server-only env var. Never prefix it with NEXT_PUBLIC_, never read it
@@ -27,43 +37,26 @@ export const maxDuration = 180
 // endpoint/baseUrl/baseURL/apiUrl fields from client requests.
 const INTERNAL_IMAGE_API_BASE_URL = process.env.INTERNAL_IMAGE_API_BASE_URL
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+// What a user may upload as a reference.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+// What the route is willing to pull down and inline on the user's behalf. This
+// is deliberately far larger than the upload limit: a channel that ignores
+// output_format and output_compression answers with raw PNG, and a single
+// 2880x2880 result measures 15-17MB across four observed generations. At the
+// old shared 10MB limit those results fell through to the bare upstream URL,
+// which is the one outcome inlineRemoteImage exists to prevent.
+//
+// The headroom matters more than the typical case: those four samples spanned
+// 15.7-17.4MB on simple prompts, and a busier image compresses worse. 32MB
+// keeps roughly a factor of two rather than the ~40% that 25MB left.
+const MAX_INLINE_IMAGE_BYTES = 32 * 1024 * 1024
 // Results travel back to the browser inline as base64 inside the JSON body, so
 // the encoded size *is* the download the user waits through. WebP at a sane
 // compression level is several times smaller than the PNG this used to default
-// to, which is the single biggest lever on perceived generation time.
+// to, which is the single biggest lever on perceived generation time — on a
+// channel that honours the request at all.
 const DEFAULT_OUTPUT_FORMAT = "webp"
 const DEFAULT_OUTPUT_COMPRESSION = 80
-const GENERATE_SIZE_VALUES = new Set([
-  "auto",
-  "256x256",
-  "512x512",
-  "1024x1024",
-  "1536x1024",
-  "1024x1536",
-  "1792x1024",
-  "1024x1792",
-  "1920x1080",
-  "1080x1920",
-  "2048x2048",
-  "2048x1152",
-  "3840x2160",
-  "2160x3840",
-])
-const EDIT_SIZE_VALUES = new Set([
-  "auto",
-  "256x256",
-  "512x512",
-  "1024x1024",
-  "1536x1024",
-  "1024x1536",
-  "1920x1080",
-  "1080x1920",
-  "2048x2048",
-  "2048x1152",
-  "3840x2160",
-  "2160x3840",
-])
 const SUPPORTED_IMAGE_TYPES = new Set([
   "image/jpeg",
   "image/jpg",
@@ -77,14 +70,23 @@ function getText(formData: FormData, key: string, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback
 }
 
-function getBackground(formData: FormData) {
+// These stay concrete even for a model that accepts neither: the output format
+// also decides how a bare base64 string is decoded downstream, and the mock
+// generator needs a background to draw. Whether the parameter is *sent* is
+// decided separately, from the same capability table — an empty allow-list
+// there means the channel rejects the key, so it is omitted entirely.
+function getBackground(formData: FormData, model: string) {
+  const supported = getModelCapabilities(model).backgrounds
   const value = getText(formData, "background", "auto")
-  return value === "transparent" || value === "opaque" || value === "auto" ? value : "auto"
+
+  return supported.includes(value) ? value : "auto"
 }
 
-function getOutputFormat(formData: FormData) {
+function getOutputFormat(formData: FormData, model: string) {
+  const supported = getModelCapabilities(model).outputFormats
   const value = getText(formData, "outputFormat", DEFAULT_OUTPUT_FORMAT)
-  return value === "jpeg" || value === "webp" || value === "png" ? value : DEFAULT_OUTPUT_FORMAT
+
+  return supported.includes(value) ? value : DEFAULT_OUTPUT_FORMAT
 }
 
 // WebP and JPEG both default to `output_compression: 100` upstream — i.e. as
@@ -94,9 +96,11 @@ function getOutputFormat(formData: FormData) {
 // turns a ~1.7MB image into a ~300-500KB one. PNG ignores the parameter.
 //
 // Set IMAGE_OUTPUT_COMPRESSION to a 0-100 value to tune, or to "off" for
-// upstreams that reject the parameter outright.
-function getOutputCompression(outputFormat: string) {
-  if (outputFormat === "png") {
+// upstreams that reject the parameter outright. Models whose channel is known
+// not to implement it opt out in the capability table instead, so one
+// deployment can mix a channel that takes it with one that does not.
+function getOutputCompression(outputFormat: string, model: string) {
+  if (outputFormat === "png" || !getModelCapabilities(model).outputCompression) {
     return undefined
   }
 
@@ -128,37 +132,24 @@ function shouldRequestB64Json() {
   return process.env.IMAGE_REQUEST_B64_JSON === "1"
 }
 
-function getGenerateQuality(formData: FormData) {
+function getQuality(formData: FormData, model: string, isEdit: boolean) {
+  const supported = getSupportedQualities(model, isEdit)
   const value = getText(formData, "quality", "auto")
-  return value === "auto" || value === "low" || value === "medium" || value === "high" || value === "standard" || value === "hd"
-    ? value
-    : "auto"
+
+  return supported.includes(value) ? value : "auto"
 }
 
-function getSize(formData: FormData, supportedSizes: Set<string>) {
+// A size outside the model's preset list is still allowed when it parses as a
+// custom size — the 64-8192 range normalizeCustomSize enforces is the same one
+// the client validates against.
+function getSize(formData: FormData, model: string, isEdit: boolean) {
   const value = getText(formData, "size", "1024x1024")
-  const normalizedCustomSize = normalizeCustomSize(value)
 
-  if (supportedSizes.has(value)) {
+  if (getSupportedSizes(model, isEdit).includes(value)) {
     return value
   }
 
-  return normalizedCustomSize || "1024x1024"
-}
-
-function getEditQuality(formData: FormData) {
-  const value = getText(formData, "quality", "auto")
-  return value === "auto" || value === "low" || value === "medium" || value === "high" || value === "standard"
-    ? value
-    : "auto"
-}
-
-function getGenerateSize(formData: FormData) {
-  return getSize(formData, GENERATE_SIZE_VALUES)
-}
-
-function getEditSize(formData: FormData) {
-  return getSize(formData, EDIT_SIZE_VALUES)
+  return normalizeCustomSize(value) || "1024x1024"
 }
 
 // Some OpenAI-compatible providers answer with a hosted `url` instead of
@@ -170,27 +161,74 @@ function getEditSize(formData: FormData) {
 // Security note: the URL fetched here comes from the *upstream response*, never
 // from the browser's request body — this does not widen the SSRF surface the
 // way accepting a client-supplied endpoint would.
+// The Cloudflare-fronted host these URLs point at is unreliable in two distinct
+// ways, both observed on URLs that succeed moments later: it refuses the
+// connection outright ("Connect Timeout", TLS handshake cut short), and it
+// serves the body so slowly that a 17MB image outruns a 45s budget. Both cost
+// the same thing — the image is already generated and billed, and falling
+// through hands the browser the upstream URL this function exists to hide — so
+// the whole download, headers *and* body, is one retryable unit.
+const INLINE_FETCH_ATTEMPTS = 3
+const INLINE_FETCH_TIMEOUT_MS = 60_000
+// Ceiling on all attempts combined, so a sulking host cannot eat the route's
+// whole maxDuration and take the generation down with it.
+const INLINE_TOTAL_BUDGET_MS = 150_000
+
+async function downloadUpstreamImage(src: string) {
+  const deadline = Date.now() + INLINE_TOTAL_BUDGET_MS
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await fetch(src, { signal: AbortSignal.timeout(INLINE_FETCH_TIMEOUT_MS) })
+
+      if (!response.ok) {
+        return { status: response.status } as const
+      }
+
+      const contentType = (response.headers.get("content-type") || "").split(";")[0].trim()
+      // Read the body inside the attempt: an abort fires during the transfer at
+      // least as often as during the connect, and a body that died half-read is
+      // exactly the case worth retrying.
+      const buffer = await response.arrayBuffer()
+
+      return { buffer, contentType, status: response.status } as const
+    } catch (error) {
+      if (attempt >= INLINE_FETCH_ATTEMPTS || Date.now() >= deadline) {
+        throw error
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000 * attempt))
+    }
+  }
+}
+
 async function inlineRemoteImage(image: GeneratedImage): Promise<GeneratedImage> {
   if (!/^https?:\/\//i.test(image.src)) {
     return image
   }
 
   try {
-    const response = await fetch(image.src)
+    const { buffer, contentType, status } = await downloadUpstreamImage(image.src)
 
-    if (!response.ok) {
+    if (!buffer) {
+      console.warn(`[api/images] inline skipped: upstream image fetch returned ${status}`)
       return image
     }
-
-    const contentType = (response.headers.get("content-type") || "").split(";")[0].trim()
 
     if (!contentType.startsWith("image/")) {
+      console.warn(`[api/images] inline skipped: unexpected content-type ${contentType || "(none)"}`)
       return image
     }
 
-    const buffer = await response.arrayBuffer()
-
-    if (buffer.byteLength > MAX_IMAGE_BYTES) {
+    if (buffer.byteLength > MAX_INLINE_IMAGE_BYTES) {
+      // Every fall-through here hands the browser the upstream URL, which is
+      // the leak this function exists to close. Silent is the wrong failure
+      // mode: say so in the server log, where raising the cap is a decision
+      // someone can actually make.
+      console.warn(
+        `[api/images] inline skipped: ${Math.round(buffer.byteLength / 1048576)}MB exceeds the ` +
+          `${Math.round(MAX_INLINE_IMAGE_BYTES / 1048576)}MB cap — the browser will receive the upstream URL`
+      )
       return image
     }
 
@@ -198,10 +236,21 @@ async function inlineRemoteImage(image: GeneratedImage): Promise<GeneratedImage>
       ...image,
       src: `data:${contentType};base64,${Buffer.from(buffer).toString("base64")}`,
     }
-  } catch {
+  } catch (error) {
     // Best effort only: fall back to the original URL and let the client cope.
+    console.warn(
+      `[api/images] inline failed: ${error instanceof Error ? error.message : String(error)}`
+    )
     return image
   }
+}
+
+// The container the bytes actually came back in, read off the data URL
+// inlineRemoteImage built from the upstream response's content-type.
+function getInlinedImageFormat(images: GeneratedImage[]) {
+  const match = /^data:image\/([a-z0-9.+-]+)/i.exec(images[0]?.src || "")
+
+  return match ? match[1].toLowerCase() : undefined
 }
 
 export async function POST(request: Request) {
@@ -250,7 +299,7 @@ export async function POST(request: Request) {
         )
       }
 
-      if (image.size > MAX_IMAGE_BYTES) {
+      if (image.size > MAX_UPLOAD_BYTES) {
         return NextResponse.json(
           { error: t(locale, "proxyImageTooLarge", { name: image.name }) },
           { status: 400 }
@@ -258,15 +307,40 @@ export async function POST(request: Request) {
       }
     }
 
-    const model = getText(incomingFormData, "model", "gpt-image-2.5-flare")
-    const outputFormat = getOutputFormat(incomingFormData)
-    const outputCompression = getOutputCompression(outputFormat)
+    const model = getText(incomingFormData, "model", DEFAULT_MODEL)
+    const capabilities = getModelCapabilities(model)
+    const outputFormat = getOutputFormat(incomingFormData, model)
+    const outputCompression = getOutputCompression(outputFormat, model)
     const imageCount = Number(getText(incomingFormData, "imageCount", "1"))
-    const background = getBackground(incomingFormData)
+    const background = getBackground(incomingFormData, model)
+    const isEdit = images.length > 0
+    const quality = getQuality(incomingFormData, model, isEdit)
+    const size = getSize(incomingFormData, model, isEdit)
     const n = Math.min(Math.max(imageCount, 1), 4)
+    const supportedSizes = getSupportedSizes(model, isEdit)
+    // Only the keys the model actually honours travel upstream. Sending one it
+    // ignores is not free: it makes the response look like it answered the
+    // request, and the UI then reports a size or format the bytes do not have.
+    // `quality` is cast to the edit union, the narrower of the two — generate
+    // additionally accepts "hd", and the capability table decides whether that
+    // value can reach here at all.
+    const optionalParams = {
+      ...(capabilities.backgrounds.length
+        ? { background: background as OpenAI.Images.ImageGenerateParams["background"] }
+        : {}),
+      ...(outputCompression === undefined ? {} : { output_compression: outputCompression }),
+      ...(capabilities.outputFormats.length
+        ? { output_format: outputFormat as OpenAI.Images.ImageGenerateParams["output_format"] }
+        : {}),
+      ...(getSupportedQualities(model, isEdit).length
+        ? { quality: quality as OpenAI.Images.ImageEditParams["quality"] }
+        : {}),
+      ...(supportedSizes.length
+        ? { size: size as OpenAI.Images.ImageGenerateParams["size"] }
+        : {}),
+      ...(shouldRequestB64Json() ? { response_format: "b64_json" as const } : {}),
+    }
     let payload: unknown
-    let requestQuality = "auto"
-    let requestSize = "1024x1024"
 
     if (mock) {
       if (shouldFailMockRequest()) {
@@ -276,13 +350,6 @@ export async function POST(request: Request) {
         )
       }
 
-      const quality = images.length
-        ? getEditQuality(incomingFormData)
-        : getGenerateQuality(incomingFormData)
-      const size = images.length ? getEditSize(incomingFormData) : getGenerateSize(incomingFormData)
-
-      requestQuality = quality
-      requestSize = size
       payload = await createMockImagePayload({
         background,
         imageCount: n,
@@ -300,42 +367,20 @@ export async function POST(request: Request) {
         maxRetries: 0,
       })
 
-      if (images.length) {
-        const quality = getEditQuality(incomingFormData)
-        const size = getEditSize(incomingFormData)
-
-        requestQuality = quality
-        requestSize = size
+      if (isEdit) {
         payload = await client.images.edit({
-          background,
           image: images.length === 1 ? images[0] : images,
           model,
           n,
-          // Omitted entirely for PNG and when disabled: some OpenAI-compatible
-          // providers reject parameters they do not implement.
-          ...(outputCompression === undefined ? {} : { output_compression: outputCompression }),
-          output_format: outputFormat,
           prompt,
-          quality,
-          ...(shouldRequestB64Json() ? { response_format: "b64_json" as const } : {}),
-          size: size as OpenAI.Images.ImageEditParams["size"],
+          ...optionalParams,
         })
       } else {
-        const quality = getGenerateQuality(incomingFormData)
-        const size = getGenerateSize(incomingFormData)
-
-        requestQuality = quality
-        requestSize = size
         payload = await client.images.generate({
-          background,
           model,
           n,
-          ...(outputCompression === undefined ? {} : { output_compression: outputCompression }),
-          output_format: outputFormat,
           prompt,
-          quality,
-          ...(shouldRequestB64Json() ? { response_format: "b64_json" as const } : {}),
-          size: size as OpenAI.Images.ImageGenerateParams["size"],
+          ...optionalParams,
         })
       }
     }
@@ -361,9 +406,15 @@ export async function POST(request: Request) {
       images: generatedImages,
       mock,
       model,
-      outputFormat,
-      quality: getPayloadField(payload, "quality") || requestQuality,
-      size: getPayloadField(payload, "size") || requestSize,
+      // Report what came back, not what was asked for. On a model that ignores
+      // output_format the request said "webp" and the bytes are PNG; echoing
+      // the request here would put that lie on the result badge.
+      outputFormat: capabilities.outputFormats.length
+        ? outputFormat
+        : getInlinedImageFormat(generatedImages) || outputFormat,
+      quality: getPayloadField(payload, "quality") ||
+        (getSupportedQualities(model, isEdit).length ? quality : undefined),
+      size: getPayloadField(payload, "size") || (supportedSizes.length ? size : undefined),
       usage: getPayloadField(payload, "usage"),
     })
 
