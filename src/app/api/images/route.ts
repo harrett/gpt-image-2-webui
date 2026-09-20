@@ -164,22 +164,32 @@ function getSize(formData: FormData, model: string, isEdit: boolean) {
 // The Cloudflare-fronted host these URLs point at is unreliable in two distinct
 // ways, both observed on URLs that succeed moments later: it refuses the
 // connection outright ("Connect Timeout", TLS handshake cut short), and it
-// serves the body so slowly that a 17MB image outruns a 45s budget. Both cost
+// serves the body at wildly varying speed — the same 17MB image has taken 40s
+// and has also failed to arrive inside 60s, three attempts running. Both cost
 // the same thing — the image is already generated and billed, and falling
 // through hands the browser the upstream URL this function exists to hide — so
 // the whole download, headers *and* body, is one retryable unit.
 const INLINE_FETCH_ATTEMPTS = 3
-const INLINE_FETCH_TIMEOUT_MS = 60_000
+const INLINE_FETCH_TIMEOUT_MS = 90_000
 // Ceiling on all attempts combined, so a sulking host cannot eat the route's
-// whole maxDuration and take the generation down with it.
-const INLINE_TOTAL_BUDGET_MS = 150_000
+// whole maxDuration and take the generation down with it. Generation itself
+// runs 40-85s, which is what leaves this much room under maxDuration.
+const INLINE_TOTAL_BUDGET_MS = 190_000
 
 async function downloadUpstreamImage(src: string) {
   const deadline = Date.now() + INLINE_TOTAL_BUDGET_MS
 
   for (let attempt = 1; ; attempt += 1) {
+    // A slow attempt must not overrun the budget it is spending from: the last
+    // attempt gets whatever is left rather than a fresh full timeout.
+    const timeout = Math.min(INLINE_FETCH_TIMEOUT_MS, deadline - Date.now())
+
+    if (timeout <= 0) {
+      throw new Error("inline download budget exhausted")
+    }
+
     try {
-      const response = await fetch(src, { signal: AbortSignal.timeout(INLINE_FETCH_TIMEOUT_MS) })
+      const response = await fetch(src, { signal: AbortSignal.timeout(timeout) })
 
       if (!response.ok) {
         return { status: response.status } as const

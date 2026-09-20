@@ -104,10 +104,11 @@ const BANANA_CAPABILITIES: ImageModelCapabilities = {
   generateSizes: BANANA_ASPECT_SIZES,
 }
 
-// The shape a channel that *does* honour these parameters takes — the full
-// OpenAI image parameter surface. Nothing routes here today; it is exported so
-// that adding such a channel is a one-line table entry rather than a rebuild of
-// the allow-lists from scratch.
+// The full OpenAI image parameter surface, for a model that honours all of it.
+// Measured, not assumed: gpt-image-2 returned 1024x1024, 1920x1080, 2048x2048
+// and 3840x2160 at exactly those pixel counts, produced WebP at a tenth of the
+// PNG's size when asked, varied file size with `quality`, and answered with
+// base64 rather than a URL every time.
 export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
   backgrounds: BACKGROUNDS,
   editQualities: EDIT_QUALITIES,
@@ -122,12 +123,12 @@ export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
 // rather than base64:
 //
 //   gpt-image-2.5   1024x1024 and 1536x1024 both -> 2880x2880 PNG, 3/3 runs
-//   gpt-image-2     does not settle: four identical requests for 1536x1024
-//                   returned that exact size as base64 PNG three times and a
-//                   2880x2880 JPEG at a URL once. It is the one model here
-//                   whose behaviour varies run to run, so it promises nothing
-//                   — do not give it a size control on the strength of the
-//                   runs where size happens to work.
+//   gpt-image-2     honours everything, exactly, and answers in base64. It
+//                   briefly looked unstable — four identical requests once
+//                   produced three exact-size PNGs and one 2880x2880 JPEG at a
+//                   URL — because two upstreams were answering to the same
+//                   name; that has since been separated and it has been
+//                   consistent across the nine runs measured after.
 //   banana-2-pro    aspect followed, resolution not -> 3392x5056 / 5056x3392
 //                   JPEG, 4/4 runs, which is what makes its control honest
 //   grok-image-2.0  2048x2048 PNG whatever is asked for, 2/2 runs
@@ -137,7 +138,7 @@ export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
 // path — and with it the canvas revision flow — is live on every one.
 const CAPABILITIES_BY_MODEL: Record<string, ImageModelCapabilities> = {
   "banana-2-pro": BANANA_CAPABILITIES,
-  "gpt-image-2": NO_SAY,
+  "gpt-image-2": OPENAI_NATIVE_CAPABILITIES,
   "gpt-image-2.5": NO_SAY,
   "grok-image-2.0": NO_SAY,
   "z-image": NO_SAY,
