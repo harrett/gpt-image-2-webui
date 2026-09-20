@@ -1030,9 +1030,6 @@ const modelItems = [
   { label: "Banana 2 Pro", value: "banana-2-pro" },
   { label: "Grok Image 2.0", value: "grok-image-2.0" },
   { label: "Z-Image", value: "z-image" },
-  // z-image-2k is configured on the gateway but answers 502 through its public
-  // name while the upstream name behind it generates fine — left out until that
-  // mapping works, so the picker never offers a choice that only fails.
   // { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
   // { label: "gpt-image-1", value: "gpt-image-1" },
 ]
