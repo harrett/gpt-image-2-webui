@@ -1268,19 +1268,35 @@ function getSizeOptions(locale: Locale, model: string, isEdit: boolean) {
     return []
   }
 
-  const aspectOnly = getModelCapabilities(model).sizeIsAspectOnly
+  const resolutions = getModelCapabilities(model).outputResolutionBySize
   const options = getAllSizeOptions(locale).filter(
     (item) => item.value === CUSTOM_SIZE_OPTION_VALUE || supported.includes(item.value)
   )
 
-  if (!aspectOnly) {
+  if (!resolutions) {
     return options
   }
 
-  return options.map((item) => ({
-    ...item,
-    label: getAspectOnlyLabel(locale, item.value) ?? item.label,
-  }))
+  return options.map((item) => {
+    const aspectLabel = getAspectOnlyLabel(locale, item.value)
+
+    if (!aspectLabel) {
+      return item
+    }
+
+    // Custom sizes have no measured figure, so they keep the ratio alone
+    // rather than borrowing a number from a preset.
+    const resolution = resolutions[item.value]
+
+    return {
+      ...item,
+      label: resolution ? `${aspectLabel} (${formatResolution(resolution)})` : aspectLabel,
+    }
+  })
+}
+
+function formatResolution(size: string) {
+  return size.replace("x", "×")
 }
 
 function getAllSizeOptions(locale: Locale) {
@@ -1511,7 +1527,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const customSizeValue = useMemo(() => normalizeCustomSize(customSize), [customSize])
   const isCustomSize = sizeMode === CUSTOM_SIZE_OPTION_VALUE
   const size: SizeValue = isCustomSize ? customSizeValue || customSize.trim() : sizeMode
-  const sizeIsAspectOnly = Boolean(getModelCapabilities(model).sizeIsAspectOnly)
+  const outputResolutions = getModelCapabilities(model).outputResolutionBySize
+  const sizeIsAspectOnly = Boolean(outputResolutions)
   // Only quote back what the user actually chose. On a model that picks its own
   // size and container, a chip reading "1024x1024 · WEBP" before the request is
   // a guess, and the result routinely contradicts it — and on one that reads
@@ -1519,7 +1536,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const requestSizeLabel = !sizeOptions.length
     ? ""
     : sizeIsAspectOnly
-      ? getAspectRatioLabel(size) ?? ""
+      ? formatResolution(outputResolutions?.[size] ?? "") || getAspectRatioLabel(size) || ""
       : size
   const requestFormatLabel = formatItems.length ? outputFormat.toUpperCase() : ""
   const qualityLabelByValue = useMemo(

@@ -28,12 +28,16 @@ export type ImageModelCapabilities = {
   /** Honoured `output_format` values; empty omits and hides. */
   outputFormats: readonly string[]
   /**
-   * The model reads only the aspect ratio out of `size` and picks its own
-   * resolution. The sizes above are still what gets sent — a ratio has to be
-   * expressed as some pixel pair — but the UI must label them by ratio, since
-   * offering "1024 x 1024" and returning 4096x4096 is a promise nobody kept.
+   * For a model that reads only the aspect ratio out of `size` and picks its
+   * own resolution: what each requested size actually comes back as. The sizes
+   * above are still what gets sent — a ratio has to be expressed as some pixel
+   * pair — but offering "1024 x 1024" and returning 4096x4096 is a promise
+   * nobody kept, so the UI labels these by ratio and quotes the real figure.
+   *
+   * Present only where every entry has been measured. Guessing here would
+   * reintroduce exactly the lie it exists to remove.
    */
-  sizeIsAspectOnly?: boolean
+  outputResolutionBySize?: Readonly<Record<string, string>>
 }
 
 // The id the picker sends. The gateway redirects it to the channel's own model
@@ -93,23 +97,29 @@ const NO_SAY: ImageModelCapabilities = {
 }
 
 // Banana is the exception worth the whole table: it ignores the *resolution* in
-// `size` but follows its aspect ratio. 1536x1024 came back 5056x3392 and
-// 1024x1536 came back 3392x5056, while omitting size gave a 4096x4096 square.
-// So the aspect control stays, and only ratios distinct from one another are
-// offered — 1920x1080 and 3840x2160 would be the same request to this model.
-const BANANA_ASPECT_SIZES = [
-  "1024x1024",
-  "1536x1024",
-  "1024x1536",
-  "1920x1080",
-  "1080x1920",
-] as const
+// `size` and answers a ratio near the one asked for with a resolution of its
+// own choosing. Only ratios distinct from one another are offered — 1920x1080
+// and 3840x2160 would be the same request to this model.
+//
+// Each figure below is measured, two to four samples apiece, and the mapping is
+// stable across them. Note it approximates rather than matches: 16:9 comes back
+// 5504x3072, which is 1.792 rather than 1.778, and 3:2 comes back 1.491. That
+// is the reason for quoting the resolution rather than only the ratio.
+const BANANA_OUTPUT_RESOLUTIONS = {
+  "1024x1024": "4096x4096",
+  "1536x1024": "5056x3392",
+  "1024x1536": "3392x5056",
+  "1920x1080": "5504x3072",
+  "1080x1920": "3072x5504",
+} as const
+
+const BANANA_ASPECT_SIZES = Object.keys(BANANA_OUTPUT_RESOLUTIONS)
 
 const BANANA_CAPABILITIES: ImageModelCapabilities = {
   ...NO_SAY,
   editSizes: BANANA_ASPECT_SIZES,
   generateSizes: BANANA_ASPECT_SIZES,
-  sizeIsAspectOnly: true,
+  outputResolutionBySize: BANANA_OUTPUT_RESOLUTIONS,
 }
 
 // The full OpenAI image parameter surface, for a model that honours all of it.
@@ -137,8 +147,8 @@ export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
 //                   URL — because two upstreams were answering to the same
 //                   name; that has since been separated and it has been
 //                   consistent across the nine runs measured after.
-//   banana-2-pro    aspect followed, resolution not -> 3392x5056 / 5056x3392
-//                   JPEG, 4/4 runs, which is what makes its control honest
+//   banana-2-pro    aspect followed, resolution not -> see the table below,
+//                   JPEG throughout, stable across every sample taken
 //   grok-image-2.0  2048x2048 PNG whatever is asked for, 2/2 runs
 //   z-image         ignores size outright; 624x624 with a size, 768x512 without
 //
