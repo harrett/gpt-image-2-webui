@@ -3027,7 +3027,13 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                           <div className="flex flex-col gap-3 border-t px-4 py-3">
                             <div className="flex items-center justify-between gap-3">
                               <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
-                                {result.outputFormat.toUpperCase()} · {result.size}
+                                {[
+                                  result.outputFormat.toUpperCase(),
+                                  result.size,
+                                  getModelLabel(result.model),
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
                               </span>
                               {image.revisedPrompt && (
                                 <Badge variant="outline" className="rounded-md bg-muted/40 text-[10px]">
@@ -3450,14 +3456,19 @@ function CanvasHistoryRail({
         {canvases.map((canvas, index) => {
           const isActive = canvas.id === activeCanvasId
           const round = workflow.sourceRound.replace("{round}", String(canvas.generation))
+          // Which model made this one. Switching models mid-session otherwise
+          // leaves a strip of thumbnails with no way to tell them apart, and
+          // the models here differ enough — one crops to the aspect you asked
+          // for, another always squares it — that the answer matters.
+          const modelLabel = getModelLabel(canvas.model)
 
           return (
             <button
               key={canvas.id}
               type="button"
               aria-current={isActive}
-              aria-label={`${workflow.historyTitle} #${canvas.serial} · ${round} · ×${canvas.images.length}`}
-              title={`#${canvas.serial} · ${round}\n${canvas.prompt}`}
+              aria-label={`${workflow.historyTitle} #${canvas.serial} · ${round} · ×${canvas.images.length} · ${modelLabel}`}
+              title={`#${canvas.serial} · ${round} · ${modelLabel}\n${canvas.prompt}`}
               onClick={() => onSelect(canvas.id)}
               className="w-[92px] shrink-0 cursor-pointer text-left outline-none"
             >
@@ -3488,6 +3499,12 @@ function CanvasHistoryRail({
                   hour: "2-digit",
                   minute: "2-digit",
                 })}
+              </div>
+              <div
+                className="truncate font-mono text-[9px] leading-tight text-muted-foreground/70"
+                title={modelLabel}
+              >
+                {modelLabel}
               </div>
             </button>
           )
