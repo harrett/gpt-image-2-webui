@@ -72,16 +72,10 @@ const EDIT_QUALITIES = ["auto", "low", "medium", "high", "standard"] as const
 const BACKGROUNDS = ["auto", "opaque", "transparent"] as const
 const OUTPUT_FORMATS = ["png", "jpeg", "webp"] as const
 
-// Measured against the channel behind these ids, not assumed: a generation
-// asking for size 1024x1024 (and again for 1536x1024), output_format webp,
-// output_compression 80 and response_format b64_json answered HTTP 200 without
-// complaint and returned, both times, a 2880x2880 PNG of ~17MB at a hosted URL.
-// The channel takes every one of those parameters and honours none of them, so
-// the user gets no say and the UI says so by omission.
-//
-// Only `prompt`, `model` and `n` are left, which is the whole reason this table
-// exists: nothing about that is visible from the request alone.
-const IMAGE2PRO_CAPABILITIES: ImageModelCapabilities = {
+// Every model on this channel takes all five parameters, answers HTTP 200, and
+// then decides for itself. None of them is rejected, so nothing about this is
+// visible from the request alone — each entry below is measured.
+const NO_SAY: ImageModelCapabilities = {
   backgrounds: [],
   editQualities: [],
   editSizes: [],
@@ -89,6 +83,25 @@ const IMAGE2PRO_CAPABILITIES: ImageModelCapabilities = {
   generateSizes: [],
   outputCompression: false,
   outputFormats: [],
+}
+
+// Banana is the exception worth the whole table: it ignores the *resolution* in
+// `size` but follows its aspect ratio. 1536x1024 came back 5056x3392 and
+// 1024x1536 came back 3392x5056, while omitting size gave a 4096x4096 square.
+// So the aspect control stays, and only ratios distinct from one another are
+// offered — 1920x1080 and 3840x2160 would be the same request to this model.
+const BANANA_ASPECT_SIZES = [
+  "1024x1024",
+  "1536x1024",
+  "1024x1536",
+  "1920x1080",
+  "1080x1920",
+] as const
+
+const BANANA_CAPABILITIES: ImageModelCapabilities = {
+  ...NO_SAY,
+  editSizes: BANANA_ASPECT_SIZES,
+  generateSizes: BANANA_ASPECT_SIZES,
 }
 
 // The shape a channel that *does* honour these parameters takes — the full
@@ -105,16 +118,31 @@ export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
   outputFormats: OUTPUT_FORMATS,
 }
 
+// Measured per model, all on the same channel and all returning a hosted URL
+// rather than base64:
+//
+//   gpt-image-2.5   1024x1024 and 1536x1024 both -> 2880x2880 PNG ~17MB
+//   gpt-image-2     same family, same behaviour
+//   banana-2-pro    aspect followed, resolution not -> 3392x5056 / 5056x3392 JPEG ~8MB
+//   grok-image-2.0  2048x2048 PNG ~4MB whatever is asked for
+//   z-image         ignores size outright; output has ranged 624x624 to 768x512
+//
+// All four accept reference images and visibly work from them, so the edit
+// path — and with it the canvas revision flow — is live on every one.
 const CAPABILITIES_BY_MODEL: Record<string, ImageModelCapabilities> = {
-  "gpt-image-2": IMAGE2PRO_CAPABILITIES,
-  "gpt-image-2.5": IMAGE2PRO_CAPABILITIES,
+  "banana-2-pro": BANANA_CAPABILITIES,
+  "gpt-image-2": NO_SAY,
+  "gpt-image-2.5": NO_SAY,
+  "grok-image-2.0": NO_SAY,
+  "z-image": NO_SAY,
 }
 
 // Unknown ids reach here from restored history: a canvas generated before a
 // model was renamed still carries the old id, and its revisions re-send it.
-// Falling back to the conservative set keeps those revisions working.
+// Falling back to the set that claims nothing keeps those revisions working
+// without inventing control the model may not have.
 export function getModelCapabilities(model: string): ImageModelCapabilities {
-  return CAPABILITIES_BY_MODEL[model] ?? IMAGE2PRO_CAPABILITIES
+  return CAPABILITIES_BY_MODEL[model] ?? NO_SAY
 }
 
 export function getSupportedSizes(model: string, isEdit: boolean) {

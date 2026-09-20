@@ -414,7 +414,11 @@ export async function POST(request: Request) {
         : getInlinedImageFormat(generatedImages) || outputFormat,
       quality: getPayloadField(payload, "quality") ||
         (getSupportedQualities(model, isEdit).length ? quality : undefined),
-      size: getPayloadField(payload, "size") || (supportedSizes.length ? size : undefined),
+      // Never echoed from the request, even for a model that takes a size: the
+      // one that follows the aspect ratio still picks its own resolution, so
+      // asking for 1024x1536 and reporting it would misstate a 3392x5056
+      // result. Absent, the client measures the pixels it actually received.
+      size: getPayloadField(payload, "size"),
       usage: getPayloadField(payload, "usage"),
     })
 
