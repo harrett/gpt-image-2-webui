@@ -1029,7 +1029,7 @@ const modelItems = [
   { label: "gpt-image-2", value: "gpt-image-2" },
   { label: "Banana 2 Pro", value: "banana-2-pro" },
   { label: "Grok Image 2.0", value: "grok-image-2.0" },
-  { label: "Z-Image", value: "z-image" },
+  { label: "Z-Image（无审核）", value: "z-image" },
   // { label: "gpt-image-2-2026-04-21", value: "gpt-image-2-2026-04-21" },
   // { label: "gpt-image-1", value: "gpt-image-1" },
 ]
