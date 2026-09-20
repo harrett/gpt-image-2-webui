@@ -245,8 +245,10 @@ async function inlineRemoteImage(image: GeneratedImage): Promise<GeneratedImage>
   }
 }
 
-// The container the bytes actually came back in, read off the data URL
-// inlineRemoteImage built from the upstream response's content-type.
+// The container the bytes actually came back in, read off the data URL — built
+// either from the upstream response's content-type when inlineRemoteImage
+// fetched it, or from the payload's own magic bytes when the upstream answered
+// with base64 directly.
 function getInlinedImageFormat(images: GeneratedImage[]) {
   const match = /^data:image\/([a-z0-9.+-]+)/i.exec(images[0]?.src || "")
 

@@ -96,6 +96,21 @@ function asString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
+// Base64 of the container's magic bytes. A provider that ignores
+// `output_format` still answers with *something*, and labelling PNG bytes as
+// the WebP we asked for makes the result badge, the download filename and the
+// format the route reports back all wrong at once.
+const BASE64_IMAGE_SIGNATURES: [prefix: string, format: string][] = [
+  ["iVBORw0KGgo", "png"],
+  ["/9j/", "jpeg"],
+  ["UklGR", "webp"],
+  ["R0lGOD", "gif"],
+]
+
+function sniffBase64ImageFormat(base64: string) {
+  return BASE64_IMAGE_SIGNATURES.find(([prefix]) => base64.startsWith(prefix))?.[1]
+}
+
 function toImageSrc(value: unknown, outputFormat: string) {
   const image = asString(value)
 
@@ -107,7 +122,9 @@ function toImageSrc(value: unknown, outputFormat: string) {
     return image
   }
 
-  return `data:image/${outputFormat};base64,${image}`
+  // The requested format is only a fallback: it is what we asked for, not
+  // necessarily what arrived.
+  return `data:image/${sniffBase64ImageFormat(image) ?? outputFormat};base64,${image}`
 }
 
 function collectImageFromRecord(record: UnknownRecord, outputFormat: string) {

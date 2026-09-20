@@ -121,11 +121,17 @@ export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
 // Measured per model, all on the same channel and all returning a hosted URL
 // rather than base64:
 //
-//   gpt-image-2.5   1024x1024 and 1536x1024 both -> 2880x2880 PNG ~17MB
-//   gpt-image-2     same family, same behaviour
-//   banana-2-pro    aspect followed, resolution not -> 3392x5056 / 5056x3392 JPEG ~8MB
-//   grok-image-2.0  2048x2048 PNG ~4MB whatever is asked for
-//   z-image         ignores size outright; output has ranged 624x624 to 768x512
+//   gpt-image-2.5   1024x1024 and 1536x1024 both -> 2880x2880 PNG, 3/3 runs
+//   gpt-image-2     does not settle: four identical requests for 1536x1024
+//                   returned that exact size as base64 PNG three times and a
+//                   2880x2880 JPEG at a URL once. It is the one model here
+//                   whose behaviour varies run to run, so it promises nothing
+//                   — do not give it a size control on the strength of the
+//                   runs where size happens to work.
+//   banana-2-pro    aspect followed, resolution not -> 3392x5056 / 5056x3392
+//                   JPEG, 4/4 runs, which is what makes its control honest
+//   grok-image-2.0  2048x2048 PNG whatever is asked for, 2/2 runs
+//   z-image         ignores size outright; 624x624 with a size, 768x512 without
 //
 // All four accept reference images and visibly work from them, so the edit
 // path — and with it the canvas revision flow — is live on every one.
