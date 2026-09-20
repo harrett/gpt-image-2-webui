@@ -1223,6 +1223,40 @@ async function createGeneratedUploadPreview({
   }
 }
 
+// The ratio a pixel pair expresses, reduced: 1920x1080 -> "16:9".
+function getAspectRatioLabel(size: string) {
+  const dimensions = getSizeDimensions(size)
+
+  if (!dimensions) {
+    return null
+  }
+
+  const divide = (a: number, b: number): number => (b ? divide(b, a % b) : a)
+  const factor = divide(dimensions.width, dimensions.height)
+
+  return `${dimensions.width / factor}:${dimensions.height / factor}`
+}
+
+// A model that reads only the ratio out of `size` must not be labelled in
+// pixels. Asking for "1024 x 1024" and receiving 4096x4096 reads as a bug; the
+// same choice labelled "Square · 1:1" is exactly what happened.
+function getAspectOnlyLabel(locale: Locale, size: string) {
+  const dimensions = getSizeDimensions(size)
+
+  if (!dimensions) {
+    return null
+  }
+
+  const orientation =
+    dimensions.width === dimensions.height
+      ? t(locale, "aspectSquare")
+      : dimensions.width > dimensions.height
+        ? t(locale, "aspectLandscape")
+        : t(locale, "aspectPortrait")
+
+  return `${orientation} · ${getAspectRatioLabel(size)}`
+}
+
 // Filtered against the model's capability table so the picker can never offer a
 // size the route would silently coerce to 1024x1024. Custom survives alongside
 // the presets — it is validated by range, not by list — but not on a model that
@@ -1234,9 +1268,19 @@ function getSizeOptions(locale: Locale, model: string, isEdit: boolean) {
     return []
   }
 
-  return getAllSizeOptions(locale).filter(
+  const aspectOnly = getModelCapabilities(model).sizeIsAspectOnly
+  const options = getAllSizeOptions(locale).filter(
     (item) => item.value === CUSTOM_SIZE_OPTION_VALUE || supported.includes(item.value)
   )
+
+  if (!aspectOnly) {
+    return options
+  }
+
+  return options.map((item) => ({
+    ...item,
+    label: getAspectOnlyLabel(locale, item.value) ?? item.label,
+  }))
 }
 
 function getAllSizeOptions(locale: Locale) {
@@ -1467,10 +1511,16 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const customSizeValue = useMemo(() => normalizeCustomSize(customSize), [customSize])
   const isCustomSize = sizeMode === CUSTOM_SIZE_OPTION_VALUE
   const size: SizeValue = isCustomSize ? customSizeValue || customSize.trim() : sizeMode
+  const sizeIsAspectOnly = Boolean(getModelCapabilities(model).sizeIsAspectOnly)
   // Only quote back what the user actually chose. On a model that picks its own
   // size and container, a chip reading "1024x1024 · WEBP" before the request is
-  // a guess, and the result routinely contradicts it.
-  const requestSizeLabel = sizeOptions.length ? size : ""
+  // a guess, and the result routinely contradicts it — and on one that reads
+  // only the ratio, the pixel pair is the wrong half of the answer.
+  const requestSizeLabel = !sizeOptions.length
+    ? ""
+    : sizeIsAspectOnly
+      ? getAspectRatioLabel(size) ?? ""
+      : size
   const requestFormatLabel = formatItems.length ? outputFormat.toUpperCase() : ""
   const qualityLabelByValue = useMemo(
     () => Object.fromEntries(qualityItems.map((item) => [item.value, item.label])),
@@ -1485,7 +1535,9 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   )
   const selectedSizeLabel = isCustomSize
     ? customSizeValue
-      ? `${customSizeValue} · ${text.aspectCustom}`
+      ? sizeIsAspectOnly
+        ? `${getAspectRatioLabel(customSizeValue) ?? customSizeValue} · ${text.aspectCustom}`
+        : `${customSizeValue} · ${text.aspectCustom}`
       : text.customAspectDescription
     : selectedSizeOption?.label ?? ""
   const result = useMemo(

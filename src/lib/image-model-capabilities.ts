@@ -27,6 +27,13 @@ export type ImageModelCapabilities = {
   outputCompression: boolean
   /** Honoured `output_format` values; empty omits and hides. */
   outputFormats: readonly string[]
+  /**
+   * The model reads only the aspect ratio out of `size` and picks its own
+   * resolution. The sizes above are still what gets sent — a ratio has to be
+   * expressed as some pixel pair — but the UI must label them by ratio, since
+   * offering "1024 x 1024" and returning 4096x4096 is a promise nobody kept.
+   */
+  sizeIsAspectOnly?: boolean
 }
 
 // The id the picker sends. The gateway redirects it to the channel's own model
@@ -102,6 +109,7 @@ const BANANA_CAPABILITIES: ImageModelCapabilities = {
   ...NO_SAY,
   editSizes: BANANA_ASPECT_SIZES,
   generateSizes: BANANA_ASPECT_SIZES,
+  sizeIsAspectOnly: true,
 }
 
 // The full OpenAI image parameter surface, for a model that honours all of it.
