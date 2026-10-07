@@ -1019,11 +1019,7 @@ const remixRecipeItems: {
   { count: 2, icon: ScissorsIcon, id: "inpaint" },
 ]
 
-// `value` is the id sent to /api/images and on to the gateway, which redirects
-// it to whatever the configured channel calls the model upstream. That upstream
-// name is deliberately not repeated here: it carries per-image pricing in its
-// text and changes whenever the channel is repriced. `label` stays free to
-// differ from `value` for the same reason.
+// `value` is the id sent to /api/images and on to the gateway.
 const modelItems = [
   { label: "gpt-image-2.5", value: DEFAULT_MODEL },
   { label: "gpt-image-2", value: "gpt-image-2" },
@@ -1051,6 +1047,8 @@ function getGenerationErrorMessage(error: unknown, fallback: string) {
 }
 
 type StudioResponse = {
+  aspectRatio?: string
+  resolution?: string
   background: string
   createdAt: number
   generation: number
@@ -1452,6 +1450,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   // fight the next click.
   const [sizeSelection, setSizeMode] = useState<SizeSelectValue>(DEFAULT_SIZE)
   const [customSize, setCustomSize] = useState(DEFAULT_CUSTOM_SIZE)
+  const [aspectRatio, setAspectRatio] = useState("auto")
+  const [resolution, setResolution] = useState("auto")
   const [qualitySelection, setQuality] = useState("auto")
   // WebP, not PNG: results come back inline as base64 in the JSON body, so the
   // encoded size is exactly the download the user sits through. PNG of a
@@ -1486,6 +1486,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   // Reference images route the request to the edit endpoint, which accepts a
   // different set of sizes and qualities than generation does.
   const isEditRequest = Boolean(activeSource) || uploads.length > 0
+  const sizingCapabilities = getModelCapabilities(model)
   const sizeOptions = useMemo(
     () => getSizeOptions(locale, model, isEditRequest),
     [isEditRequest, locale, model]
@@ -1533,11 +1534,13 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   // size and container, a chip reading "1024x1024 · WEBP" before the request is
   // a guess, and the result routinely contradicts it — and on one that reads
   // only the ratio, the pixel pair is the wrong half of the answer.
-  const requestSizeLabel = !sizeOptions.length
-    ? ""
-    : sizeIsAspectOnly
-      ? formatResolution(outputResolutions?.[size] ?? "") || getAspectRatioLabel(size) || ""
-      : size
+  const requestSizeLabel = sizingCapabilities.aspectRatios
+    ? [aspectRatio, resolution].filter((value) => value !== "auto").join(" · ")
+    : !sizeOptions.length
+      ? ""
+      : sizeIsAspectOnly
+        ? formatResolution(outputResolutions?.[size] ?? "") || getAspectRatioLabel(size) || ""
+        : size
   const requestFormatLabel = formatItems.length ? outputFormat.toUpperCase() : ""
   const qualityLabelByValue = useMemo(
     () => Object.fromEntries(qualityItems.map((item) => [item.value, item.label])),
@@ -1820,6 +1823,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const restoreCanvasSettings = useCallback((canvas: StudioResponse) => {
     setCustomPrompt(canvas.prompt)
     setModel(canvas.model)
+    setAspectRatio(canvas.aspectRatio ?? "auto")
+    setResolution(canvas.resolution ?? "auto")
     setQuality(canvas.quality)
     setOutputFormat(canvas.outputFormat)
     setBackground(canvas.background)
@@ -2175,6 +2180,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
     formData.append("prompt", requestPrompt)
     formData.append("quality", quality)
     formData.append("size", size)
+    if (sizingCapabilities.aspectRatios) formData.append("aspect_ratio", aspectRatio)
+    if (sizingCapabilities.resolutions) formData.append("resolution", resolution)
 
     for (const upload of inputUploads) {
       formData.append("images", upload.file, upload.file.name)
@@ -2287,6 +2294,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
       let servedSize: string | undefined
 
       const createResult = (visibleImages: GeneratedImage[]): StudioResponse => ({
+        ...(sizingCapabilities.aspectRatios ? { aspectRatio, resolution } : {}),
         background,
         createdAt,
         generation: nextGeneration,
@@ -2618,6 +2626,34 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
 
             <Section index="02" title={text.sectionOutputTitle} hint={text.sectionOutputHint}>
               <FieldGroup>
+                {sizingCapabilities.aspectRatios && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { label: text.aspect, value: aspectRatio, onChange: setAspectRatio, options: sizingCapabilities.aspectRatios },
+                        { label: text.resolution, value: resolution, onChange: setResolution, options: sizingCapabilities.resolutions ?? [] },
+                      ].map((control) => (
+                        <Field key={control.label}>
+                          <FieldLabel className="text-xs font-semibold text-muted-foreground">{control.label}</FieldLabel>
+                          <Select
+                            items={[{ label: text.qualityAuto, value: "auto" }, ...control.options.map((value) => ({ label: value, value }))]}
+                            value={control.value}
+                            onValueChange={(value) => control.onChange(value ?? "auto")}
+                          >
+                            <SelectTrigger className="studio-control h-11 w-full rounded-md font-mono text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent align="start">
+                              <SelectGroup>
+                                <SelectItem value="auto">{text.qualityAuto}</SelectItem>
+                                {control.options.map((value) => <SelectItem key={value} value={value} className="font-mono text-xs">{value}</SelectItem>)}
+                              </SelectGroup>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      ))}
+                    </div>
+                    <FieldDescription className="text-xs">{text.targetSizingHint}</FieldDescription>
+                  </>
+                )}
                 {sizeOptions.length > 0 && (
                 <Field data-invalid={isCustomSize && !customSizeValue ? true : undefined}>
                   <FieldLabel className="text-xs font-semibold text-muted-foreground">
@@ -3262,6 +3298,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           image={result.images[editorImageIndex]}
           locale={locale}
           source={{
+            aspectRatio: result.aspectRatio,
+            resolution: result.resolution,
             background: result.background,
             model: result.model,
             outputFormat: result.outputFormat,

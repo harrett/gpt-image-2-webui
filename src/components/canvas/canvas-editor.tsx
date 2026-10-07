@@ -59,6 +59,8 @@ const EXPORT_PADDING = 16
 const IMAGE_ELEMENT_ID = "imgx-source-image"
 
 export type CanvasEditorSource = {
+  aspectRatio?: string
+  resolution?: string
   background: string
   model: string
   outputFormat: string
@@ -341,6 +343,8 @@ export function CanvasEditor({
         width: current.width,
         height: current.height,
         model: source.model,
+        aspectRatio: source.aspectRatio,
+        resolution: source.resolution,
         outputFormat: source.outputFormat,
         background: source.background,
         quality: source.quality,
@@ -631,4 +635,3 @@ function formatList(values: string[]) {
 
   return `${values.slice(0, -1).join(", ")} and ${values[values.length - 1]}`
 }
-

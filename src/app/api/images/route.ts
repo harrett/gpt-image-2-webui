@@ -12,9 +12,11 @@ import {
 } from "@/lib/image-request"
 import {
   DEFAULT_MODEL,
+  getImageSizingParams,
   getModelCapabilities,
   getSupportedQualities,
   getSupportedSizes,
+  normalizeImageModel,
 } from "@/lib/image-model-capabilities"
 import { normalizeCustomSize } from "@/lib/image-size"
 import { PAYLOAD_BYTES_HEADER } from "@/lib/transfer-progress"
@@ -319,7 +321,7 @@ export async function POST(request: Request) {
       }
     }
 
-    const model = getText(incomingFormData, "model", DEFAULT_MODEL)
+    const model = normalizeImageModel(getText(incomingFormData, "model", DEFAULT_MODEL))
     const capabilities = getModelCapabilities(model)
     const outputFormat = getOutputFormat(incomingFormData, model)
     const outputCompression = getOutputCompression(outputFormat, model)
@@ -330,6 +332,12 @@ export async function POST(request: Request) {
     const size = getSize(incomingFormData, model, isEdit)
     const n = Math.min(Math.max(imageCount, 1), 4)
     const supportedSizes = getSupportedSizes(model, isEdit)
+    let sizingParams: ReturnType<typeof getImageSizingParams>
+    try {
+      sizingParams = getImageSizingParams(model, incomingFormData)
+    } catch {
+      return NextResponse.json({ error: "Invalid aspect_ratio or resolution" }, { status: 400 })
+    }
     // Only the keys the model actually honours travel upstream. Sending one it
     // ignores is not free: it makes the response look like it answered the
     // request, and the UI then reports a size or format the bytes do not have.
@@ -337,6 +345,7 @@ export async function POST(request: Request) {
     // additionally accepts "hd", and the capability table decides whether that
     // value can reach here at all.
     const optionalParams = {
+      ...sizingParams,
       ...(capabilities.backgrounds.length
         ? { background: background as OpenAI.Images.ImageGenerateParams["background"] }
         : {}),

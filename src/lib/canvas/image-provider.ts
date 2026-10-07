@@ -14,7 +14,7 @@
 import { inspectReference } from "@/lib/canvas/debug-reference"
 import { getStoredApiKey } from "@/lib/connection-preferences"
 import { DEFAULT_LOCALE, resolveLocale, t, type Locale } from "@/lib/i18n"
-import { DEFAULT_MODEL } from "@/lib/image-model-capabilities"
+import { DEFAULT_MODEL, getModelCapabilities } from "@/lib/image-model-capabilities"
 import type { GeneratedImage } from "@/lib/image-request"
 import { sizeForCanvasBox } from "@/lib/image-size"
 import {
@@ -54,6 +54,8 @@ export type CanvasImageResult = {
 }
 
 type CanvasImageRequest = {
+  aspectRatio?: string
+  resolution?: string
   prompt: string
   /** Target width in canvas units; clamped to the route's 64-8192 range. */
   width?: number
@@ -204,6 +206,8 @@ async function prepareReferenceFile(dataUrl: string) {
 }
 
 async function requestImage({
+  aspectRatio,
+  resolution,
   prompt,
   width,
   height,
@@ -233,6 +237,9 @@ async function requestImage({
   formData.append("outputFormat", outputFormat)
   formData.append("prompt", prompt)
   formData.append("quality", quality)
+  const capabilities = getModelCapabilities(model)
+  if (capabilities.aspectRatios && aspectRatio) formData.append("aspect_ratio", aspectRatio)
+  if (capabilities.resolutions && resolution) formData.append("resolution", resolution)
 
   if (width && height) {
     formData.append("size", sizeForCanvasBox(width, height))

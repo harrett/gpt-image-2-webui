@@ -10,7 +10,7 @@
 // 选择权，客户端隐藏控件、服务端省略字段。
 
 const DEFAULT_BASE_URL = "https://api.image2pro.top/v1"
-const DEFAULT_MODEL = "GPT-Image-2.5 0.01/张"
+const DEFAULT_MODEL = "gpt-image-2.5-flare"
 const DEFAULT_PROMPT = "a quiet bookstore at dawn, warm light"
 // 刻意写成「只改一处、其余照搬」：如果上游真的用了参考图，结果应当明显脱胎于原图；
 // 如果它把参考图丢掉直接按文字重画，结果会和原图毫无关系——这一点只有肉眼分得清。
@@ -41,7 +41,7 @@ function printHelp() {
                             从状态码和响应结构上完全看不出来，只能看图。
 
 选项:
-      --generate            允许发起真实生成（会产生费用，默认约 0.01/张）
+      --generate            允许发起真实生成（会产生费用）
       --edit <图片路径>     用该图跑一发 edits（会产生费用），结果存到 --out-dir
       --out-dir <目录>      存放探测结果图片（默认: generated）
   -m, --model <模型>        探测用模型（默认: ${DEFAULT_MODEL}）

@@ -13,6 +13,9 @@
 // body otherwise untouched, so what lands here is what the channel sees.
 
 export type ImageModelCapabilities = {
+  /** Image2Pro target settings; mapped to the nearest supported output upstream. */
+  aspectRatios?: readonly string[]
+  resolutions?: readonly string[]
   /** Honoured `background` values; empty omits the parameter and hides the control. */
   backgrounds: readonly string[]
   /** Honoured `quality` values for edits; empty omits and hides. */
@@ -40,10 +43,13 @@ export type ImageModelCapabilities = {
   outputResolutionBySize?: Readonly<Record<string, string>>
 }
 
-// The id the picker sends. The gateway redirects it to the channel's own model
-// name, which carries per-image pricing in its text and therefore must not be
-// hardcoded here — it changes whenever the channel is repriced.
-export const DEFAULT_MODEL = "gpt-image-2.5"
+// Current model id used by the picker and the upstream channel.
+export const DEFAULT_MODEL = "gpt-image-2.5-flare"
+
+// Old canvases and clients may still carry either previous model id.
+export function normalizeImageModel(model: string) {
+  return model === "gpt-image-2.5" || model === "GPT-Image-2.5 0.01/张" ? DEFAULT_MODEL : model
+}
 
 const GENERATE_SIZES = [
   "auto",
@@ -140,7 +146,8 @@ export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
 // Measured per model, all on the same channel and all returning a hosted URL
 // rather than base64:
 //
-//   gpt-image-2.5   1024x1024 and 1536x1024 both -> 2880x2880 PNG, 3/3 runs
+//   gpt-image-2.5-flare historically ignored size; Image2Pro now accepts explicit
+//                   aspect_ratio and resolution targets instead
 //   gpt-image-2     honours everything, exactly, and answers in base64. It
 //                   briefly looked unstable — four identical requests once
 //                   produced three exact-size PNGs and one 2880x2880 JPEG at a
@@ -157,17 +164,18 @@ export const OPENAI_NATIVE_CAPABILITIES: ImageModelCapabilities = {
 const CAPABILITIES_BY_MODEL: Record<string, ImageModelCapabilities> = {
   "banana-2-pro": BANANA_CAPABILITIES,
   "gpt-image-2": OPENAI_NATIVE_CAPABILITIES,
-  "gpt-image-2.5": NO_SAY,
+  [DEFAULT_MODEL]: {
+    ...NO_SAY,
+    aspectRatios: ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16"],
+    resolutions: ["1K", "2K", "4K"],
+  },
   "grok-image-2.0": NO_SAY,
   "z-image": NO_SAY,
 }
 
-// Unknown ids reach here from restored history: a canvas generated before a
-// model was renamed still carries the old id, and its revisions re-send it.
-// Falling back to the set that claims nothing keeps those revisions working
-// without inventing control the model may not have.
+// Known previous ids keep their capabilities; unknown ids claim no controls.
 export function getModelCapabilities(model: string): ImageModelCapabilities {
-  return CAPABILITIES_BY_MODEL[model] ?? NO_SAY
+  return CAPABILITIES_BY_MODEL[normalizeImageModel(model)] ?? NO_SAY
 }
 
 export function getSupportedSizes(model: string, isEdit: boolean) {
@@ -180,4 +188,24 @@ export function getSupportedQualities(model: string, isEdit: boolean) {
   const capabilities = getModelCapabilities(model)
 
   return isEdit ? capabilities.editQualities : capabilities.generateQualities
+}
+
+export function getImageSizingParams(model: string, formData: FormData) {
+  const capabilities = getModelCapabilities(model)
+  const params: { aspect_ratio?: string; resolution?: string } = {}
+
+  for (const [field, supported] of [
+    ["aspect_ratio", capabilities.aspectRatios],
+    ["resolution", capabilities.resolutions],
+  ] as const) {
+    if (!supported) continue
+    const value = formData.get(field)
+    if (value === null || value === "auto") continue
+    if (typeof value !== "string" || !supported.includes(value)) {
+      throw new Error(`Invalid ${field}`)
+    }
+    params[field] = value
+  }
+
+  return params
 }

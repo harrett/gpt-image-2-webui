@@ -9,6 +9,8 @@
 // Every call fails soft: hardened/private browsing contexts can refuse to open
 // a database, and the studio must keep working in memory when that happens.
 
+import { normalizeImageModel } from "@/lib/image-model-capabilities"
+
 const DATABASE_NAME = "imgx.history"
 const DATABASE_VERSION = 1
 const CANVAS_STORE = "canvases"
@@ -22,6 +24,8 @@ export type HistoryImage = {
 }
 
 export type HistoryCanvas = {
+  aspectRatio?: string
+  resolution?: string
   background: string
   createdAt: number
   generation: number
@@ -157,6 +161,7 @@ async function toStoredCanvas(canvas: HistoryCanvas): Promise<StoredCanvas> {
 function toHistoryCanvas(stored: StoredCanvas): HistoryCanvas {
   return {
     ...stored,
+    model: normalizeImageModel(stored.model),
     images: stored.images.map((image) => ({
       revisedPrompt: image.revisedPrompt,
       src: URL.createObjectURL(image.blob),
