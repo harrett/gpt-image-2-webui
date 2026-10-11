@@ -232,6 +232,7 @@ type WorkflowCopy = {
   historyClearConfirm: string
   historyCleared: string
   historyLatestBadge: string
+  historyLoading: string
   historyPending: string
   historyRestore: string
   historyRestored: string
@@ -287,6 +288,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "Confirm clear",
     historyCleared: "Local history cleared.",
     historyLatestBadge: "Latest",
+    historyLoading: "Restoring local history…",
     historyPending: "Generating",
     historyRestore: "Restore these settings",
     historyRestored: "Prompt and settings restored from this canvas.",
@@ -361,6 +363,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "确认清空",
     historyCleared: "已清空本地历史。",
     historyLatestBadge: "最新",
+    historyLoading: "正在恢复本地历史记录…",
     historyPending: "生成中",
     historyRestore: "恢复该轮参数",
     historyRestored: "已恢复该画布的提示词与参数。",
@@ -435,6 +438,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "確認清空",
     historyCleared: "已清空本機歷史。",
     historyLatestBadge: "最新",
+    historyLoading: "正在恢復本機歷史記錄…",
     historyPending: "生成中",
     historyRestore: "還原該輪參數",
     historyRestored: "已還原該畫布的提示詞與參數。",
@@ -509,6 +513,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "消去を確認",
     historyCleared: "ローカル履歴を消去しました。",
     historyLatestBadge: "最新",
+    historyLoading: "ローカル履歴を復元中…",
     historyPending: "生成中",
     historyRestore: "この回の設定を復元",
     historyRestored: "このキャンバスのプロンプトと設定を復元しました。",
@@ -583,6 +588,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "지우기 확인",
     historyCleared: "로컬 기록을 지웠습니다.",
     historyLatestBadge: "최신",
+    historyLoading: "로컬 기록을 복원하는 중…",
     historyPending: "생성 중",
     historyRestore: "이 회차 설정 복원",
     historyRestored: "이 캔버스의 프롬프트와 설정을 복원했습니다.",
@@ -657,6 +663,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "Confirmar borrado",
     historyCleared: "Historial local borrado.",
     historyLatestBadge: "Último",
+    historyLoading: "Restaurando el historial local…",
     historyPending: "Generando",
     historyRestore: "Restaurar estos ajustes",
     historyRestored: "Prompt y ajustes restaurados desde este lienzo.",
@@ -731,6 +738,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "Confirmer l'effacement",
     historyCleared: "Historique local effacé.",
     historyLatestBadge: "Dernier",
+    historyLoading: "Restauration de l’historique local…",
     historyPending: "Génération",
     historyRestore: "Restaurer ces réglages",
     historyRestored: "Prompt et réglages restaurés depuis ce canevas.",
@@ -805,6 +813,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "Löschen bestätigen",
     historyCleared: "Lokaler Verlauf gelöscht.",
     historyLatestBadge: "Neuestes",
+    historyLoading: "Lokalen Verlauf wird wiederhergestellt…",
     historyPending: "Wird erzeugt",
     historyRestore: "Diese Einstellungen wiederherstellen",
     historyRestored: "Prompt und Einstellungen aus dieser Leinwand wiederhergestellt.",
@@ -879,6 +888,7 @@ const workflowCopies: Record<Locale, WorkflowCopy> = {
     historyClearConfirm: "Confirmar limpeza",
     historyCleared: "Histórico local limpo.",
     historyLatestBadge: "Mais recente",
+    historyLoading: "Restaurando o histórico local…",
     historyPending: "Gerando",
     historyRestore: "Restaurar estas configurações",
     historyRestored: "Prompt e configurações restaurados desta tela.",
@@ -1467,6 +1477,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   const transfer = useTransferProgress()
   const [canvases, setCanvases] = useState<StudioResponse[]>([])
   const [activeCanvasId, setActiveCanvasId] = useState<string | null>(null)
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true)
   const [storageUsage, setStorageUsage] = useState<number | null>(null)
   const [selectedImageIndex, setSelectedImageIndex] = useState(0)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
@@ -1636,56 +1647,66 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   useEffect(() => {
     let cancelled = false
 
-    const timeoutId = window.setTimeout(async () => {
-      const restored = await readHistory(MAX_HISTORY_CANVASES)
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const restored = await readHistory(MAX_HISTORY_CANVASES)
 
-      if (cancelled || !restored) {
-        hasRestoredHistoryRef.current = true
-        return
-      }
+          if (cancelled || !restored) {
+            return
+          }
 
-      // Seed the reconciler so restored canvases are not written straight back.
-      for (const canvas of restored.canvases) {
-        persistedCanvasesRef.current.set(canvas.id, canvas)
-      }
+          // Seed the reconciler so restored canvases are not written straight back.
+          for (const canvas of restored.canvases) {
+            persistedCanvasesRef.current.set(canvas.id, canvas)
+          }
 
-      if (restored.canvases.length) {
-        canvasSerialRef.current = Math.max(...restored.canvases.map((canvas) => canvas.serial))
-        setCanvases(restored.canvases)
-        setActiveCanvasId(
-          restored.canvases.some((canvas) => canvas.id === restored.session?.activeCanvasId)
-            ? restored.session!.activeCanvasId
-            : restored.canvases[0].id
-        )
-      }
+          if (restored.canvases.length) {
+            canvasSerialRef.current = Math.max(...restored.canvases.map((canvas) => canvas.serial))
+            setCanvases(restored.canvases)
+            setActiveCanvasId(
+              restored.canvases.some((canvas) => canvas.id === restored.session?.activeCanvasId)
+                ? restored.session!.activeCanvasId
+                : restored.canvases[0].id
+            )
+          }
 
-      const session = restored.session
+          const session = restored.session
 
-      if (session?.uploads.length) {
-        setUploads(
-          session.uploads.map((upload) => ({
-            file: upload.file,
-            id: upload.id,
-            url: URL.createObjectURL(upload.file),
-          }))
-        )
-      }
+          if (session?.uploads.length) {
+            setUploads(
+              session.uploads.map((upload) => ({
+                file: upload.file,
+                id: upload.id,
+                url: URL.createObjectURL(upload.file),
+              }))
+            )
+          }
 
-      if (session?.activeSource) {
-        setActiveSource({
-          label: session.activeSource.label,
-          promptSnapshot: session.activeSource.promptSnapshot,
-          round: session.activeSource.round,
-          upload: {
-            file: session.activeSource.file,
-            id: session.activeSource.id,
-            url: URL.createObjectURL(session.activeSource.file),
-          },
-        })
-      }
+          if (session?.activeSource) {
+            setActiveSource({
+              label: session.activeSource.label,
+              promptSnapshot: session.activeSource.promptSnapshot,
+              round: session.activeSource.round,
+              upload: {
+                file: session.activeSource.file,
+                id: session.activeSource.id,
+                url: URL.createObjectURL(session.activeSource.file),
+              },
+            })
+          }
 
-      hasRestoredHistoryRef.current = true
-      setStorageUsage(await estimateUsage())
+          setStorageUsage(await estimateUsage())
+        } catch (error) {
+          console.warn("[image-studio] local history restore failed", error)
+        } finally {
+          hasRestoredHistoryRef.current = true
+
+          if (!cancelled) {
+            setIsHistoryLoading(false)
+          }
+        }
+      })()
     }, 0)
 
     return () => {
@@ -2430,6 +2451,7 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
   return (
     <div
       data-locale={locale}
+      aria-busy={isHistoryLoading}
       translate="no"
       className={cn("notranslate studio-shell flex min-h-screen flex-col text-foreground", isCjk && "studio-cjk")}
     >
@@ -3326,6 +3348,19 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           onAcknowledge={acknowledgeRiskNotice}
           onDisagree={() => setIsRiskNoticeOpen(false)}
         />
+      )}
+
+      {isHistoryLoading && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 px-6 backdrop-blur-md"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex max-w-sm items-center gap-3 rounded-lg border bg-card/95 px-5 py-4 text-sm text-foreground shadow-2xl">
+            <LoaderCircleIcon className="size-4 shrink-0 animate-spin text-primary" aria-hidden="true" />
+            <span>{workflow.historyLoading}</span>
+          </div>
+        </div>
       )}
     </div>
   )
