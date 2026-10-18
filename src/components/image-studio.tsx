@@ -38,7 +38,7 @@ import {
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -1413,6 +1413,83 @@ function getPreferredClientLocale(): Locale {
     readCookieValue(LOCALE_COOKIE_KEY),
     navigator.language,
     document.documentElement.lang
+  )
+}
+
+function ImageDownloadButton({
+  className,
+  errorLabel,
+  fileName,
+  label,
+  loadingLabel,
+  size,
+  src,
+}: {
+  className?: string
+  errorLabel: string
+  fileName: string
+  label: string
+  loadingLabel: string
+  size: "sm" | "lg"
+  src: string
+}) {
+  const [isDownloading, setIsDownloading] = useState(false)
+  const downloadInFlightRef = useRef(false)
+
+  const handleDownload = async () => {
+    if (downloadInFlightRef.current) {
+      return
+    }
+
+    downloadInFlightRef.current = true
+    setIsDownloading(true)
+
+    try {
+      const response = await fetch(src)
+
+      if (!response.ok) {
+        throw new Error(`Download failed with status ${response.status}`)
+      }
+
+      const objectUrl = URL.createObjectURL(await response.blob())
+      const anchor = document.createElement("a")
+      anchor.href = objectUrl
+      anchor.download = fileName
+      document.body.append(anchor)
+      anchor.click()
+      anchor.remove()
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+    } catch (error) {
+      console.error("Image download failed", error)
+      toast.error(errorLabel)
+    } finally {
+      downloadInFlightRef.current = false
+      setIsDownloading(false)
+    }
+  }
+
+  return (
+    <Button
+      type="button"
+      size={size}
+      variant="outline"
+      className={className}
+      disabled={isDownloading}
+      aria-busy={isDownloading}
+      aria-label={isDownloading ? loadingLabel : label}
+      onClick={handleDownload}
+    >
+      {isDownloading ? (
+        <LoaderCircleIcon className="animate-spin" data-icon="inline-start" />
+      ) : (
+        <ArrowDownToLineIcon data-icon="inline-start" />
+      )}
+      {size === "lg" ? (
+        <span className="hidden sm:inline">{isDownloading ? loadingLabel : label}</span>
+      ) : (
+        isDownloading ? loadingLabel : label
+      )}
+    </Button>
   )
 }
 
@@ -3194,17 +3271,15 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
                                 <PencilRulerIcon data-icon="inline-start" />
                                 {text.canvasEditorTitle}
                               </Button>
-                              <a
-                                className={cn(
-                                  buttonVariants({ size: "sm", variant: "outline" }),
-                                  "col-span-2 h-9 rounded-md bg-muted/40 px-3 text-xs font-semibold"
-                                )}
-                                download={`imgx-${index + 1}.${result.outputFormat}`}
-                                href={image.src}
-                              >
-                                <ArrowDownToLineIcon data-icon="inline-start" />
-                                {text.save}
-                              </a>
+                              <ImageDownloadButton
+                                className="col-span-2 h-9 rounded-md bg-muted/40 px-3 text-xs font-semibold"
+                                errorLabel={text.downloadFailed}
+                                fileName={`imgx-${index + 1}.${result.outputFormat}`}
+                                label={text.save}
+                                loadingLabel={text.transferDownloadLabel}
+                                size="sm"
+                                src={image.src}
+                              />
                             </div>
                           </div>
                         </article>
@@ -3293,6 +3368,8 @@ export function ImageStudio({ initialLocale = DEFAULT_LOCALE }: { initialLocale?
           images={result.images}
           index={viewerIndex}
           outputFormat={result.outputFormat}
+          downloadErrorLabel={text.downloadFailed}
+          downloadLoadingLabel={text.transferDownloadLabel}
           saveLabel={text.save}
           size={result.size}
           workflow={workflow}
@@ -3924,6 +4001,8 @@ function ImageViewer({
   images,
   index,
   outputFormat,
+  downloadErrorLabel,
+  downloadLoadingLabel,
   saveLabel,
   size,
   workflow,
@@ -3937,6 +4016,8 @@ function ImageViewer({
   images: GeneratedImage[]
   index: number
   outputFormat: string
+  downloadErrorLabel: string
+  downloadLoadingLabel: string
   saveLabel: string
   size: string
   workflow: WorkflowCopy
@@ -4134,17 +4215,15 @@ function ImageViewer({
               {isZoomed ? workflow.fitToScreen : workflow.actualSize}
             </span>
           </Button>
-          <a
-            className={cn(
-              buttonVariants({ size: "lg", variant: "outline" }),
-              "rounded-md bg-muted/40 px-3 text-xs font-semibold"
-            )}
-            download={`imgx-${index + 1}.${outputFormat}`}
-            href={image.src}
-          >
-            <ArrowDownToLineIcon data-icon="inline-start" />
-            <span className="hidden sm:inline">{saveLabel}</span>
-          </a>
+          <ImageDownloadButton
+            className="rounded-md bg-muted/40 px-3 text-xs font-semibold"
+            errorLabel={downloadErrorLabel}
+            fileName={`imgx-${index + 1}.${outputFormat}`}
+            label={saveLabel}
+            loadingLabel={downloadLoadingLabel}
+            size="lg"
+            src={image.src}
+          />
           <Button
             type="button"
             size="icon-lg"
